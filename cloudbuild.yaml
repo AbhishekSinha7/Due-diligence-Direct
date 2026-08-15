@@ -1,0 +1,67 @@
+# Build and deploy the fleet control plane to Cloud Run.
+#
+#   gcloud builds submit --config cloudbuild.yaml \
+#     --substitutions=_REGION=europe-west2,_SERVICE_ACCOUNT=duediligence-fleet@PROJECT_ID.iam.gserviceaccount.com
+#
+# Notes:
+# - $BUILD_ID is used for the immutable tag. SHORT_SHA is only populated for
+#   repo-triggered builds and would be empty for `gcloud builds submit`.
+# - _SERVICE_ACCOUNT must be passed explicitly; substitution defaults cannot
+#   interpolate $PROJECT_ID.
+# - Secrets come from Secret Manager and are never baked into the image:
+#   gemini-api-key, companies-house-api-key, fleet-signing-key
+
+substitutions:
+  _REGION: europe-west2
+  _SERVICE: duediligence-direct
+  _REPO: fleet
+  _SERVICE_ACCOUNT: ""
+  # Background diligence jobs keep running after the HTTP response, so keep one
+  # warm instance during a demo. Set to 0 to minimise cost when idle.
+  _MIN_INSTANCES: "1"
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${BUILD_ID}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest
+      - .
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${BUILD_ID}
+      - --region=${_REGION}
+      - --service-account=${_SERVICE_ACCOUNT}
+      - --no-allow-unauthenticated
+      - --cpu=2
+      - --memory=2Gi
+      - --timeout=900
+      - --min-instances=${_MIN_INSTANCES}
+      - --max-instances=10
+      # CPU stays allocated so background jobs continue after the response.
+      - --no-cpu-throttling
+      - --set-env-vars=FLEET_ENVIRONMENT=production,FLEET_CLOUD_PLATFORM=gcp_cloud_run,FLEET_CLOUD_TRACE=true,GEMINI_MODEL=gemini-3.5-flash,FLEET_DATA_REGION=${_REGION},FLEET_SERVICE_ACCOUNT=${_SERVICE_ACCOUNT}
+      - --set-secrets=GEMINI_API_KEY=gemini-api-key:latest,COMPANIES_HOUSE_API_KEY=companies-house-api-key:latest,FLEET_SIGNING_KEY=fleet-signing-key:latest
+
+images:
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${BUILD_ID}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY

@@ -1,0 +1,72 @@
+{
+  "track": "The Fortified Enterprise Fleet",
+  "verification_note": "These are demo scripts, not assertions about any company's current status. Re-run against live data before recording.",
+  "scenarios": [
+    {
+      "id": "clean_async_run",
+      "label": "Async fleet run",
+      "crn": "03994971",
+      "data_room_path": "sample_data_room",
+      "surface": "dashboard",
+      "demo_goal": "Submit a job and show it executing in the background runtime while stage events stream in.",
+      "watch_for": ["job id returned immediately", "live stage events", "Synthesizer verdict"]
+    },
+    {
+      "id": "filed_accounts",
+      "label": "Real filed accounts",
+      "crn": "03994971",
+      "data_room_path": "sample_data_room",
+      "surface": "dashboard: Filed accounts tab",
+      "demo_goal": "Show that every financial figure is extracted from the company's own iXBRL filing and computed in Python, not produced by the model.",
+      "watch_for": [
+        "balance sheet by period with tag-level evidence such as NetAssetsLiabilities@FY_END_20250531",
+        "four accounting identity checks",
+        "current ratio withheld because the filing fails the working capital identity",
+        "net assets decline reported from consistent tags"
+      ]
+    },
+    {
+      "id": "governance_evidence",
+      "label": "Governance and audit trail",
+      "crn": "03994971",
+      "data_room_path": "sample_data_room",
+      "surface": "dashboard: Governance tab, Audit trail tab",
+      "demo_goal": "Show trace id, model used, registry versions, guardrail verdicts, and the audit hash chain verifying.",
+      "watch_for": ["gateway.call allow records", "registry versions", "audit chain verified"]
+    },
+    {
+      "id": "model_armor_defence",
+      "label": "Hostile data room",
+      "crn": "03994971",
+      "data_room_path": "sample_data_room_hostile",
+      "surface": "dashboard or CLI",
+      "demo_goal": "A seller document tries to steer the audit; Model Armor quarantines it and the attempt is reported as a risk.",
+      "watch_for": ["Quarantined 1 document(s)", "QUARANTINED badge in the Data room tab", "model_armor.input deny record"]
+    },
+    {
+      "id": "cross_session_memory",
+      "label": "Memory bank delta",
+      "crn": "03994971",
+      "data_room_path": "sample_data_room",
+      "surface": "dashboard: Memory tab",
+      "demo_goal": "Re-run the same company and show prior verdicts recalled plus any tracked statutory fact that changed.",
+      "watch_for": ["Recalled N prior audit(s)", "changes_since_last_audit", "operator notes persisting"]
+    },
+    {
+      "id": "policy_denial",
+      "label": "Gateway denial",
+      "crn": "03994971",
+      "surface": "python -c \"import gateway, orchestrator; gateway.call('debate', 'collect_company_records', crn='03994971')\"",
+      "demo_goal": "Show that an agent without the published capability and scope is refused at the gateway and the denial is audited.",
+      "watch_for": ["PolicyViolation raised", "gateway.call deny record in /audit"]
+    },
+    {
+      "id": "invalid_input",
+      "label": "Input validation",
+      "crn": "123",
+      "surface": "dashboard or POST /jobs",
+      "demo_goal": "Show that an invalid CRN is rejected before any agent is dispatched.",
+      "watch_for": ["validation error, no job created"]
+    }
+  ]
+}

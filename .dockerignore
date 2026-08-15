@@ -1,0 +1,12 @@
+venv/
+.fleet/
+telemetry/
+runs/
+data_room/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.log
+.env
+.git/
+tests/
