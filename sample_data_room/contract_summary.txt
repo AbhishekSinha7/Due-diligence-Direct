@@ -1,0 +1,15 @@
+SYNTHETIC EXAMPLE - NOT A REAL AGREEMENT, NOT ATTRIBUTABLE TO ANY COMPANY
+
+Illustrative customer master services agreement summary, used to exercise the Legal Risk
+Agent on contractual material that has no statutory filing. Financial figures are never
+taken from this folder; those come from the target's filed iXBRL accounts.
+
+1. TERM AND TERMINATION
+   The agreement includes a change of control consent requirement. Either party may
+   terminate if the counterparty assigns the agreement without prior written consent.
+
+2. INDEMNITY
+   The customer requests an uncapped indemnity for confidentiality breaches.
+
+3. GOVERNING LAW
+   England and Wales.

@@ -1,0 +1,131 @@
+import os
+import tempfile
+from pathlib import Path
+import unittest
+
+from pydantic import ValidationError
+
+import data_room_loader
+import mcp_server
+from orchestrator import run_due_diligence
+
+
+class EnvironmentPatch:
+    def __init__(self, *names: str):
+        self.names = names
+        self.previous: dict[str, str | None] = {}
+
+    def __enter__(self):
+        for name in self.names:
+            self.previous[name] = os.environ.pop(name, None)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        for name, value in self.previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+class CoreBehaviorTests(unittest.TestCase):
+    def test_company_query_normalizes_crn(self):
+        query = mcp_server.CompanyQuery(crn=" 0399 4971 ")
+        self.assertEqual(query.crn, "03994971")
+
+    def test_company_query_rejects_invalid_crn(self):
+        with self.assertRaises(ValidationError):
+            mcp_server.CompanyQuery(crn="123")
+
+    def test_missing_companies_house_key_returns_config_status(self):
+        with EnvironmentPatch("COMPANIES_HOUSE_API_KEY"):
+            result = mcp_server._make_request("/company/03994971")
+        self.assertEqual(result["status"], "config_missing")
+
+    def test_offline_graph_returns_structured_report(self):
+        with EnvironmentPatch("COMPANIES_HOUSE_API_KEY", "GEMINI_API_KEY"):
+            state = run_due_diligence("03994971", save_artifact=False)
+
+        report = state["red_flag_verdict"]
+        self.assertIn(
+            report["recommendation"],
+            {"GREEN LIGHT", "PROCEED WITH CAUTION", "RED FLAG DEAL BREAKER"},
+        )
+        self.assertIn("raw_statutory_data", state)
+
+    def test_fallback_evidence_uses_charge_and_filing_details(self):
+        bundle = {
+            "profile": {
+                "status": "success",
+                "data": {
+                    "company_name": "Example Ltd",
+                    "company_status": "active",
+                    "accounts": {"next_due": "2026-12-31", "overdue": False},
+                },
+            },
+            "charges": {
+                "status": "success",
+                "data": {
+                    "total_count": 1,
+                    "items": [
+                        {
+                            "id": "abc123",
+                            "status": "outstanding",
+                            "created_on": "2025-01-01",
+                            "classification": {"description": "debenture"},
+                        }
+                    ],
+                },
+            },
+            "filings": {
+                "status": "success",
+                "data": {
+                    "items": [
+                        {
+                            "date": "2026-01-15",
+                            "category": "accounts",
+                            "description": "accounts-with-accounts-type-total-exemption-full",
+                        }
+                    ]
+                },
+            },
+            "insolvency": {"status": "not_found"},
+            "pscs": {"status": "success", "data": {"items": []}},
+        }
+
+        from orchestrator import _fallback_financial, _fallback_legal
+
+        legal = _fallback_legal(bundle)
+        financial = _fallback_financial(bundle)
+
+        self.assertIn("abc123", legal["risks"][1]["evidentiary_quote"])
+        self.assertIn("2026-01-15", financial["findings"][1]["evidentiary_quote"])
+
+    def test_data_room_loader_reads_text_and_csv_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "contract.txt").write_text(
+                "This agreement includes a change of control termination clause.",
+                encoding="utf-8",
+            )
+            (root / "financials.csv").write_text(
+                "month,revenue,expenses\nJan,100,80\n",
+                encoding="utf-8",
+            )
+
+            result = data_room_loader.load_data_room(root)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(len(result["documents"]), 2)
+        classifications = {doc["file_name"]: doc["classification"] for doc in result["documents"]}
+        self.assertEqual(classifications["contract.txt"], "legal")
+        self.assertEqual(classifications["financials.csv"], "financial")
+
+    def test_data_room_loader_handles_missing_folder(self):
+        result = data_room_loader.load_data_room("__missing_data_room__")
+        self.assertEqual(result["status"], "not_found")
+        self.assertEqual(result["documents"], [])
+
+
+if __name__ == "__main__":
+    unittest.main()

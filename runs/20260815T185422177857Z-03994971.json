@@ -1,0 +1,1010 @@
+{
+  "crn": "03994971",
+  "run_id": "20260815T185422177857Z",
+  "job_id": "",
+  "trace_id": "bc0398da5123d2802e1f656f2639156b",
+  "data_room_path": "sample_data_room",
+  "raw_statutory_data": {
+    "profile": {
+      "status": "success",
+      "endpoint": "/company/03994971",
+      "data": {
+        "accounts": {
+          "accounting_reference_date": {
+            "day": "31",
+            "month": "05"
+          },
+          "last_accounts": {
+            "made_up_to": "2025-05-31",
+            "period_end_on": "2025-05-31",
+            "period_start_on": "2024-06-01",
+            "type": "micro-entity"
+          },
+          "next_accounts": {
+            "due_on": "2027-02-28",
+            "overdue": false,
+            "period_end_on": "2026-05-31",
+            "period_start_on": "2025-06-01"
+          },
+          "next_due": "2027-02-28",
+          "next_made_up_to": "2026-05-31",
+          "overdue": false
+        },
+        "can_file": true,
+        "company_name": "THIRD PARTY FORMATIONS LIMITED",
+        "company_number": "03994971",
+        "company_status": "active",
+        "confirmation_statement": {
+          "last_made_up_to": "2026-08-08",
+          "next_due": "2027-08-22",
+          "next_made_up_to": "2027-08-08",
+          "overdue": false
+        },
+        "date_of_creation": "2000-05-16",
+        "etag": "d12b8c3452550b100da6e425e861e5352b7ce58c",
+        "has_been_liquidated": false,
+        "has_charges": false,
+        "has_insolvency_history": false,
+        "jurisdiction": "england-wales",
+        "last_full_members_list_date": "2015-08-08",
+        "links": {
+          "persons_with_significant_control": "/company/03994971/persons-with-significant-control",
+          "self": "/company/03994971",
+          "filing_history": "/company/03994971/filing-history",
+          "officers": "/company/03994971/officers"
+        },
+        "registered_office_address": {
+          "address_line_1": "Office 6760, 321 - 323 High Road",
+          "country": "United Kingdom",
+          "locality": "Chadwell Heath",
+          "postal_code": "RM6 6AX"
+        },
+        "registered_office_is_in_dispute": false,
+        "sic_codes": [
+          "69109"
+        ],
+        "type": "ltd",
+        "undeliverable_registered_office_address": false,
+        "has_super_secure_pscs": false
+      }
+    },
+    "insolvency": {
+      "status": "not_found",
+      "endpoint": "/company/03994971/insolvency",
+      "message": "No statutory records found for this endpoint."
+    },
+    "charges": {
+      "status": "success",
+      "endpoint": "/company/03994971/charges",
+      "data": {
+        "etag": "213aa1ca0dbc714c150deea6278e17a1117931c6",
+        "total_count": 0,
+        "unfiltered_count": 0,
+        "satisfied_count": 0,
+        "part_satisfied_count": 0,
+        "items": []
+      }
+    },
+    "filings": {
+      "status": "success",
+      "endpoint": "/company/03994971/filing-history?category=accounts&items_per_page=10",
+      "data": {
+        "filing_history_status": "filing-history-available",
+        "items": [
+          {
+            "transaction_id": "MzUwNjMyMjE0M2FkaXF6a2N4",
+            "barcode": "XEWBMRSR",
+            "type": "AA",
+            "date": "2026-02-20",
+            "category": "accounts",
+            "description": "accounts-with-accounts-type-micro-entity",
+            "description_values": {
+              "made_up_date": "2025-05-31"
+            },
+            "pages": 3,
+            "action_date": "2025-05-31",
+            "links": {
+              "self": "/company/03994971/filing-history/MzUwNjMyMjE0M2FkaXF6a2N4",
+              "document_metadata": "https://document-api.company-information.service.gov.uk/document/FJx7X00f5bBTgbpPT82MRZOkHWWpUsjpjvyCGnVbga0"
+            }
+          },
+          {
+            "transaction_id": "MzQ1NjY4NzAwOWFkaXF6a2N4",
+            "barcode": "XDX9HQTS",
+            "type": "AA",
+            "date": "2025-02-27",
+            "category": "accounts",
+            "description": "accounts-with-accounts-type-micro-entity",
+            "description_values": {
+              "made_up_date": "2024-05-31"
+            },
+            "pages": 4,
+            "action_date": "2024-05-31",
+            "links": {
+              "self": "/company/03994971/filing-history/MzQ1NjY4NzAwOWFkaXF6a2N4",
+              "document_metadata": "https://document-api.company-information.service.gov.uk/document/fhnH4YDcAfprl-h2NaIA38b8nj0qIeYV4V-t0S_MXKM"
+            }
+          },
+          {
+            "transaction_id": "MzQxMzAwNjgxNmFkaXF6a2N4",
+            "barcode": "XCXXBQL7",
+            "type": "AA",
+            "date": "2024-02-29",
+            "category": "accounts",
+            "description": "accounts-with-accounts-type-total-exemption-full",
+            "description_values": {
+              "made_up_date": "2023-05-31"
+            },
+            "pages": 8,
+            "action_date": "2023-05-31",
+            "links": {
+              "self": "/company/03994971/filing-history/MzQxMzAwNjgxNmFkaXF6a2N4",
+              "document_metadata": "https://document-api.company-information.service.gov.uk/document/hA-nahXZLyEGbgxC_hjGOGBoOGtBFX55pE8wE5RMZQQ"
+            }
+          },
+          {
+            "transaction_id": "MzM3MTA0ODIxNGFkaXF6a2N4",
+            "barcode": "XBYAWBTN",
+            "type": "AA",
+            "date": "2023-02-28",
+            "category": "accounts",
+            "description": "accounts-with-accounts-type-total-exemption-full",
+            "description_values": {
+              "made_up_date": "2022-05-31"
+            },
+            "pages": 8,
+            "action_date": "2022-05-31",
+            "links": {
+              "self": "/company/03994971/filing-history/MzM3MTA0ODIxNGFkaXF6a2N4",
+              "document_metadata": "https://document-api.company-information.service.gov.uk/document/EeApdNIdaGqQw797r0V3fWHAottZ0P7ntVLwplFPKxQ"
+            }
+          },
+          {
+            "transaction_id": "MzMzMTM1MTk5OGFkaXF6a2N4",
+            "barcode": "XAYTILGP",
+            "type": "AA",
+            "date": "2022-02-28",
+            "category": "accounts",
+            "description": "accounts-with-accounts-type-total-exemption-full",
+            "description_values": {
+              "made_up_date": "2021-05-31"
+            },
+            "pages": 8,
+            "action_date": "2021-05-31",
+            "links": {
+              "self": "/company/03994971/filing-history/MzMzMTM1MTk5OGFkaXF6a2N4",
+              "document_metadata": "https://document-api.company-information.service.gov.uk/document/A_LFh9OyvnUSyC4-Y6YC9w8rJTU4LB86uMZcacdglw4"
+            }
+          },
+          {
+            "transaction_id": "MzMwMjY5NjUyOGFkaXF6a2N4",
+            "barcode": "XA5FLQBK",
+            "type": "AA",
+            "date": "2021-05-28",
+            "category": "accounts",
+            "description": "accounts-with-accounts-type-total-exemption-full",
+            "description_values": {
+              "made_up_date": "2020-05-31"
+            },
+            "pages": 8,
+            "action_date": "2020-05-31",
+            "links": {
+              "self": "/company/03994971/filing-history/MzMwMjY5NjUyOGFkaXF6a2N4",
+              "document_metadata": "https://document-api.company-information.service.gov.uk/document/CPNGzfiJgE1UBxbnpnoKcTljFggP4XigRjpgJMW-R8Q"
+            }
+          },
+          {
+            "transaction_id": "MzI1ODU4NTkzOWFkaXF6a2N4",
+            "barcode": "X8ZRJX68",
+            "type": "AA",
+            "date": "2020-02-28",
+            "category": "accounts",
+            "description": "accounts-with-accounts-type-total-exemption-full",
+            "description_values": {
+              "made_up_date": "2019-05-31"
+            },
+            "pages": 8,
+            "action_date": "2019-05-31",
+            "links": {
+              "self": "/company/03994971/filing-history/MzI1ODU4NTkzOWFkaXF6a2N4",
+              "document_metadata": "https://document-api.company-information.service.gov.uk/document/Kxt_s35H1uTMqssxiuknbIPdKiBFNcQUsP7OkKPD7c8"
+            }
+          },
+          {
+            "transaction_id": "MzIyODI5NTQ0MGFkaXF6a2N4",
+            "barcode": "X808FCGY",
+            "type": "AA",
+            "date": "2019-02-28",
+            "category": "accounts",
+            "description": "accounts-with-accounts-type-total-exemption-full",
+            "description_values": {
+              "made_up_date": "2018-05-31"
+            },
+            "pages": 10,
+            "action_date": "2018-05-31",
+            "links": {
+              "self": "/company/03994971/filing-history/MzIyODI5NTQ0MGFkaXF6a2N4",
+              "document_metadata": "https://document-api.company-information.service.gov.uk/document/tMf9epRaEgjRS64mKHQoHPfJeJ9ojjjtnpEnaHD8uTw"
+            }
+          },
+          {
+            "transaction_id": "MzE5ODg2OTM0MmFkaXF6a2N4",
+            "barcode": "X70OAD1M",
+            "type": "AA",
+            "date": "2018-02-27",
+            "category": "accounts",
+            "description": "accounts-with-accounts-type-total-exemption-full",
+            "description_values": {
+              "made_up_date": "2017-05-31"
+            },
+            "pages": 10,
+            "action_date": "2017-05-31",
+            "links": {
+              "self": "/company/03994971/filing-history/MzE5ODg2OTM0MmFkaXF6a2N4",
+              "document_metadata": "https://document-api.company-information.service.gov.uk/document/gD9rHTL4ZlSC59kn1Ohw-WqcXPDxXYvl_27zJKW0Ki0"
+            }
+          },
+          {
+            "transaction_id": "MzE3MDAyMDIwN2FkaXF6a2N4",
+            "barcode": "X618A1AH",
+            "type": "AA",
+            "date": "2017-02-28",
+            "category": "accounts",
+            "description": "accounts-with-accounts-type-total-exemption-small",
+            "description_values": {
+              "made_up_date": "2016-05-31"
+            },
+            "pages": 8,
+            "action_date": "2016-05-31",
+            "links": {
+              "self": "/company/03994971/filing-history/MzE3MDAyMDIwN2FkaXF6a2N4",
+              "document_metadata": "https://document-api.company-information.service.gov.uk/document/IEPmssCK3FvIxwFvG6YGlnE5abgRI6h8fdGcENnwVHk"
+            }
+          }
+        ],
+        "items_per_page": 10,
+        "start_index": 0,
+        "total_count": 27
+      }
+    },
+    "pscs": {
+      "status": "success",
+      "endpoint": "/company/03994971/persons-with-significant-control",
+      "data": {
+        "items_per_page": 25,
+        "items": [
+          {
+            "etag": "da6143d1d6667216d8ac5031f3e4839a3715b5c0",
+            "notified_on": "2016-08-08",
+            "country_of_residence": "England",
+            "date_of_birth": {
+              "month": 11,
+              "year": 1968
+            },
+            "name": "Mr Richard Peter Jobling",
+            "name_elements": {
+              "title": "Mr",
+              "surname": "Jobling",
+              "forename": "Richard",
+              "middle_name": "Peter"
+            },
+            "links": {
+              "self": "/company/03994971/persons-with-significant-control/individual/qwLM5n5JJlkMNGgojCxpbSp65ZE"
+            },
+            "nationality": "British",
+            "identity_verification_details": {
+              "appointment_verification_end_on": "9999-12-31",
+              "appointment_verification_start_on": "2026-08-11"
+            },
+            "ceased": false,
+            "kind": "individual-person-with-significant-control",
+            "address": {
+              "address_line_1": "321 - 323 High Road",
+              "country": "United Kingdom",
+              "locality": "Chadwell Heath",
+              "postal_code": "RM6 6AX",
+              "premises": "Office 6760,"
+            },
+            "natures_of_control": [
+              "ownership-of-shares-75-to-100-percent",
+              "voting-rights-75-to-100-percent"
+            ]
+          }
+        ],
+        "start_index": 0,
+        "total_results": 1,
+        "active_count": 1,
+        "ceased_count": 0,
+        "links": {
+          "self": "/company/03994971/persons-with-significant-control"
+        }
+      }
+    }
+  },
+  "accounts": {
+    "status": "success",
+    "crn": "03994971",
+    "filings_examined": 2,
+    "latest": {
+      "filing_date": "2026-02-20",
+      "description": "accounts-with-accounts-type-micro-entity",
+      "made_up_date": "2025-05-31",
+      "transaction_id": "MzUwNjMyMjE0M2FkaXF6a2N4",
+      "document_id": "FJx7X00f5bBTgbpPT82MRZOkHWWpUsjpjvyCGnVbga0",
+      "available_formats": [
+        "application/pdf",
+        "application/xhtml+xml"
+      ],
+      "pages": 3,
+      "status": "success",
+      "source": "companies_house_ixbrl",
+      "document_url": "https://document-api.company-information.service.gov.uk/document/FJx7X00f5bBTgbpPT82MRZOkHWWpUsjpjvyCGnVbga0/content",
+      "document_bytes": 50877,
+      "analysis": {
+        "status": "success",
+        "entity_name": "THIRD PARTY FORMATIONS LIMITED",
+        "company_number": "03994971",
+        "balance_sheet_date": "2025-05-31",
+        "periods": [
+          {
+            "period_end": "2025-05-31",
+            "metrics": {
+              "current_assets": 1688.0,
+              "creditors_within_one_year": -3870.0,
+              "net_current_assets": 5558.0,
+              "total_assets_less_current_liabilities": 5558.0,
+              "net_assets": 5558.0,
+              "equity": 5558.0,
+              "employees": 0.0,
+              "current_ratio": 0.436,
+              "working_capital": 5558.0
+            },
+            "evidence": {
+              "current_assets": "CurrentAssets@FY_END_20250531",
+              "creditors_within_one_year": "Creditors@FY_END_20250531_CORE_MATURITIESOREXPIRATIONPERIODSDIMENSION_CORE_WITHINONEYEAR",
+              "net_current_assets": "NetCurrentAssetsLiabilities@FY_END_20250531",
+              "total_assets_less_current_liabilities": "TotalAssetsLessCurrentLiabilities@FY_END_20250531",
+              "net_assets": "NetAssetsLiabilities@FY_END_20250531",
+              "equity": "Equity@FY_END_20250531",
+              "employees": "AverageNumberEmployeesDuringPeriod@FY_20250531"
+            },
+            "reconciliation": [
+              {
+                "identity": "working_capital",
+                "formula": "current_assets - creditors_within_one_year = net_current_assets",
+                "expected": -2182.0,
+                "reported": 5558.0,
+                "difference": -7740.0,
+                "consistent": false
+              },
+              {
+                "identity": "total_assets_less_current_liabilities",
+                "formula": "net_current_assets + fixed_assets = total_assets_less_current_liabilities",
+                "expected": 5558.0,
+                "reported": 5558.0,
+                "difference": 0.0,
+                "consistent": true
+              },
+              {
+                "identity": "net_assets",
+                "formula": "total_assets_less_current_liabilities - creditors_after_one_year = net_assets",
+                "expected": 5558.0,
+                "reported": 5558.0,
+                "difference": 0.0,
+                "consistent": true
+              },
+              {
+                "identity": "balance_sheet_balances",
+                "formula": "net_assets = equity",
+                "expected": 5558.0,
+                "reported": 5558.0,
+                "difference": 0.0,
+                "consistent": true
+              }
+            ],
+            "internally_consistent": false
+          },
+          {
+            "period_end": "2024-05-31",
+            "metrics": {
+              "current_assets": 18714.0,
+              "creditors_within_one_year": -9068.0,
+              "net_current_assets": 27782.0,
+              "total_assets_less_current_liabilities": 27782.0,
+              "net_assets": 27782.0,
+              "equity": 27782.0,
+              "employees": 0.0,
+              "current_ratio": 2.064,
+              "working_capital": 27782.0
+            },
+            "evidence": {
+              "current_assets": "CurrentAssets@FY_END_20240531",
+              "creditors_within_one_year": "Creditors@FY_END_20240531_CORE_MATURITIESOREXPIRATIONPERIODSDIMENSION_CORE_WITHINONEYEAR",
+              "net_current_assets": "NetCurrentAssetsLiabilities@FY_END_20240531",
+              "total_assets_less_current_liabilities": "TotalAssetsLessCurrentLiabilities@FY_END_20240531",
+              "net_assets": "NetAssetsLiabilities@FY_END_20240531",
+              "equity": "Equity@FY_END_20240531",
+              "employees": "AverageNumberEmployeesDuringPeriod@FY_20240531"
+            },
+            "reconciliation": [
+              {
+                "identity": "working_capital",
+                "formula": "current_assets - creditors_within_one_year = net_current_assets",
+                "expected": 9646.0,
+                "reported": 27782.0,
+                "difference": -18136.0,
+                "consistent": false
+              },
+              {
+                "identity": "total_assets_less_current_liabilities",
+                "formula": "net_current_assets + fixed_assets = total_assets_less_current_liabilities",
+                "expected": 27782.0,
+                "reported": 27782.0,
+                "difference": 0.0,
+                "consistent": true
+              },
+              {
+                "identity": "net_assets",
+                "formula": "total_assets_less_current_liabilities - creditors_after_one_year = net_assets",
+                "expected": 27782.0,
+                "reported": 27782.0,
+                "difference": 0.0,
+                "consistent": true
+              },
+              {
+                "identity": "balance_sheet_balances",
+                "formula": "net_assets = equity",
+                "expected": 27782.0,
+                "reported": 27782.0,
+                "difference": 0.0,
+                "consistent": true
+              }
+            ],
+            "internally_consistent": false
+          }
+        ],
+        "derived": {
+          "latest_period_end": "2025-05-31",
+          "previous_period_end": "2024-05-31",
+          "net_assets": 5558.0,
+          "internally_consistent": false,
+          "current_ratio": 0.436,
+          "current_ratio_reliable": false,
+          "months_between_periods": 12.0,
+          "net_assets_change": -22224.0,
+          "net_assets_change_pct": -79.99,
+          "current_assets_change": -17026.0,
+          "current_assets_change_pct": -90.98
+        },
+        "signals": [
+          {
+            "code": "filing_internally_inconsistent",
+            "severity": "MEDIUM",
+            "detail": "The filed accounts fail 1 balance sheet identity check(s) (working_capital). Liquidity ratios are unreliable for this filing and require manual verification against the source document.",
+            "evidence": "current_assets - creditors_within_one_year = net_current_assets -> expected -2,182, filed 5,558"
+          },
+          {
+            "code": "net_assets_declining",
+            "severity": "MEDIUM",
+            "detail": "Net assets fell by 22,224 between 2024-05-31 and 2025-05-31.",
+            "evidence": "NetAssetsLiabilities@FY_END_20250531"
+          }
+        ],
+        "fact_count": 14,
+        "parse_errors": []
+      }
+    },
+    "filings": [
+      {
+        "filing_date": "2026-02-20",
+        "description": "accounts-with-accounts-type-micro-entity",
+        "made_up_date": "2025-05-31",
+        "transaction_id": "MzUwNjMyMjE0M2FkaXF6a2N4",
+        "document_id": "FJx7X00f5bBTgbpPT82MRZOkHWWpUsjpjvyCGnVbga0",
+        "available_formats": [
+          "application/pdf",
+          "application/xhtml+xml"
+        ],
+        "pages": 3,
+        "status": "success",
+        "source": "companies_house_ixbrl",
+        "document_url": "https://document-api.company-information.service.gov.uk/document/FJx7X00f5bBTgbpPT82MRZOkHWWpUsjpjvyCGnVbga0/content",
+        "document_bytes": 50877,
+        "analysis": {
+          "status": "success",
+          "entity_name": "THIRD PARTY FORMATIONS LIMITED",
+          "company_number": "03994971",
+          "balance_sheet_date": "2025-05-31",
+          "periods": [
+            {
+              "period_end": "2025-05-31",
+              "metrics": {
+                "current_assets": 1688.0,
+                "creditors_within_one_year": -3870.0,
+                "net_current_assets": 5558.0,
+                "total_assets_less_current_liabilities": 5558.0,
+                "net_assets": 5558.0,
+                "equity": 5558.0,
+                "employees": 0.0,
+                "current_ratio": 0.436,
+                "working_capital": 5558.0
+              },
+              "evidence": {
+                "current_assets": "CurrentAssets@FY_END_20250531",
+                "creditors_within_one_year": "Creditors@FY_END_20250531_CORE_MATURITIESOREXPIRATIONPERIODSDIMENSION_CORE_WITHINONEYEAR",
+                "net_current_assets": "NetCurrentAssetsLiabilities@FY_END_20250531",
+                "total_assets_less_current_liabilities": "TotalAssetsLessCurrentLiabilities@FY_END_20250531",
+                "net_assets": "NetAssetsLiabilities@FY_END_20250531",
+                "equity": "Equity@FY_END_20250531",
+                "employees": "AverageNumberEmployeesDuringPeriod@FY_20250531"
+              },
+              "reconciliation": [
+                {
+                  "identity": "working_capital",
+                  "formula": "current_assets - creditors_within_one_year = net_current_assets",
+                  "expected": -2182.0,
+                  "reported": 5558.0,
+                  "difference": -7740.0,
+                  "consistent": false
+                },
+                {
+                  "identity": "total_assets_less_current_liabilities",
+                  "formula": "net_current_assets + fixed_assets = total_assets_less_current_liabilities",
+                  "expected": 5558.0,
+                  "reported": 5558.0,
+                  "difference": 0.0,
+                  "consistent": true
+                },
+                {
+                  "identity": "net_assets",
+                  "formula": "total_assets_less_current_liabilities - creditors_after_one_year = net_assets",
+                  "expected": 5558.0,
+                  "reported": 5558.0,
+                  "difference": 0.0,
+                  "consistent": true
+                },
+                {
+                  "identity": "balance_sheet_balances",
+                  "formula": "net_assets = equity",
+                  "expected": 5558.0,
+                  "reported": 5558.0,
+                  "difference": 0.0,
+                  "consistent": true
+                }
+              ],
+              "internally_consistent": false
+            },
+            {
+              "period_end": "2024-05-31",
+              "metrics": {
+                "current_assets": 18714.0,
+                "creditors_within_one_year": -9068.0,
+                "net_current_assets": 27782.0,
+                "total_assets_less_current_liabilities": 27782.0,
+                "net_assets": 27782.0,
+                "equity": 27782.0,
+                "employees": 0.0,
+                "current_ratio": 2.064,
+                "working_capital": 27782.0
+              },
+              "evidence": {
+                "current_assets": "CurrentAssets@FY_END_20240531",
+                "creditors_within_one_year": "Creditors@FY_END_20240531_CORE_MATURITIESOREXPIRATIONPERIODSDIMENSION_CORE_WITHINONEYEAR",
+                "net_current_assets": "NetCurrentAssetsLiabilities@FY_END_20240531",
+                "total_assets_less_current_liabilities": "TotalAssetsLessCurrentLiabilities@FY_END_20240531",
+                "net_assets": "NetAssetsLiabilities@FY_END_20240531",
+                "equity": "Equity@FY_END_20240531",
+                "employees": "AverageNumberEmployeesDuringPeriod@FY_20240531"
+              },
+              "reconciliation": [
+                {
+                  "identity": "working_capital",
+                  "formula": "current_assets - creditors_within_one_year = net_current_assets",
+                  "expected": 9646.0,
+                  "reported": 27782.0,
+                  "difference": -18136.0,
+                  "consistent": false
+                },
+                {
+                  "identity": "total_assets_less_current_liabilities",
+                  "formula": "net_current_assets + fixed_assets = total_assets_less_current_liabilities",
+                  "expected": 27782.0,
+                  "reported": 27782.0,
+                  "difference": 0.0,
+                  "consistent": true
+                },
+                {
+                  "identity": "net_assets",
+                  "formula": "total_assets_less_current_liabilities - creditors_after_one_year = net_assets",
+                  "expected": 27782.0,
+                  "reported": 27782.0,
+                  "difference": 0.0,
+                  "consistent": true
+                },
+                {
+                  "identity": "balance_sheet_balances",
+                  "formula": "net_assets = equity",
+                  "expected": 27782.0,
+                  "reported": 27782.0,
+                  "difference": 0.0,
+                  "consistent": true
+                }
+              ],
+              "internally_consistent": false
+            }
+          ],
+          "derived": {
+            "latest_period_end": "2025-05-31",
+            "previous_period_end": "2024-05-31",
+            "net_assets": 5558.0,
+            "internally_consistent": false,
+            "current_ratio": 0.436,
+            "current_ratio_reliable": false,
+            "months_between_periods": 12.0,
+            "net_assets_change": -22224.0,
+            "net_assets_change_pct": -79.99,
+            "current_assets_change": -17026.0,
+            "current_assets_change_pct": -90.98
+          },
+          "signals": [
+            {
+              "code": "filing_internally_inconsistent",
+              "severity": "MEDIUM",
+              "detail": "The filed accounts fail 1 balance sheet identity check(s) (working_capital). Liquidity ratios are unreliable for this filing and require manual verification against the source document.",
+              "evidence": "current_assets - creditors_within_one_year = net_current_assets -> expected -2,182, filed 5,558"
+            },
+            {
+              "code": "net_assets_declining",
+              "severity": "MEDIUM",
+              "detail": "Net assets fell by 22,224 between 2024-05-31 and 2025-05-31.",
+              "evidence": "NetAssetsLiabilities@FY_END_20250531"
+            }
+          ],
+          "fact_count": 14,
+          "parse_errors": []
+        }
+      },
+      {
+        "filing_date": "2025-02-27",
+        "description": "accounts-with-accounts-type-micro-entity",
+        "made_up_date": "2024-05-31",
+        "transaction_id": "MzQ1NjY4NzAwOWFkaXF6a2N4",
+        "document_id": "fhnH4YDcAfprl-h2NaIA38b8nj0qIeYV4V-t0S_MXKM",
+        "available_formats": [
+          "application/pdf",
+          "application/xhtml+xml"
+        ],
+        "pages": 4,
+        "status": "success",
+        "source": "companies_house_ixbrl",
+        "document_url": "https://document-api.company-information.service.gov.uk/document/fhnH4YDcAfprl-h2NaIA38b8nj0qIeYV4V-t0S_MXKM/content",
+        "document_bytes": 27194,
+        "analysis": {
+          "status": "success",
+          "entity_name": "THIRD PARTY FORMATIONS LIMITED",
+          "company_number": "03994971",
+          "balance_sheet_date": "2024-05-31",
+          "periods": [
+            {
+              "period_end": "2024-05-31",
+              "metrics": {
+                "fixed_assets": 553.0,
+                "current_assets": 54392.0,
+                "equity": 22894.0,
+                "creditors_within_one_year": 11290.0,
+                "creditors_after_one_year": 20761.0,
+                "employees": 1.0,
+                "current_ratio": 4.818,
+                "working_capital": 43102.0
+              },
+              "evidence": {
+                "fixed_assets": "FixedAssets@FY_END_20240531",
+                "current_assets": "CurrentAssets@FY_END_20240531",
+                "equity": "Equity@FY_END_20240531",
+                "creditors_within_one_year": "Creditors@FY_END_20240531_CORE_MATURITIESOREXPIRATIONPERIODSDIMENSION_CORE_WITHINONEYEAR",
+                "creditors_after_one_year": "Creditors@FY_END_20240531_CORE_MATURITIESOREXPIRATIONPERIODSDIMENSION_CORE_AFTERONEYEAR",
+                "employees": "AverageNumberEmployeesDuringPeriod@FY_20240531"
+              },
+              "reconciliation": [],
+              "internally_consistent": true
+            },
+            {
+              "period_end": "2023-05-31",
+              "metrics": {
+                "fixed_assets": 42402.0,
+                "current_assets": 97026.0,
+                "equity": 73094.0,
+                "creditors_within_one_year": 30688.0,
+                "creditors_after_one_year": 32860.0,
+                "employees": 1.0,
+                "current_ratio": 3.162,
+                "working_capital": 66338.0
+              },
+              "evidence": {
+                "fixed_assets": "FixedAssets@FY_END_20230531",
+                "current_assets": "CurrentAssets@FY_END_20230531",
+                "equity": "Equity@FY_END_20230531",
+                "creditors_within_one_year": "Creditors@FY_END_20230531_CORE_MATURITIESOREXPIRATIONPERIODSDIMENSION_CORE_WITHINONEYEAR",
+                "creditors_after_one_year": "Creditors@FY_END_20230531_CORE_MATURITIESOREXPIRATIONPERIODSDIMENSION_CORE_AFTERONEYEAR",
+                "employees": "AverageNumberEmployeesDuringPeriod@FY_20230531"
+              },
+              "reconciliation": [],
+              "internally_consistent": true
+            }
+          ],
+          "derived": {
+            "latest_period_end": "2024-05-31",
+            "previous_period_end": "2023-05-31",
+            "internally_consistent": true,
+            "current_ratio": 4.818,
+            "current_ratio_reliable": true,
+            "months_between_periods": 12.0,
+            "current_assets_change": -42634.0,
+            "current_assets_change_pct": -43.94
+          },
+          "signals": [],
+          "fact_count": 12,
+          "parse_errors": []
+        }
+      }
+    ]
+  },
+  "data_room": {
+    "status": "success",
+    "folder": "sample_data_room",
+    "documents": [
+      {
+        "file_name": "contract_summary.txt",
+        "path": "sample_data_room\\contract_summary.txt",
+        "extension": ".txt",
+        "classification": "legal",
+        "text_excerpt": "SYNTHETIC EXAMPLE - NOT A REAL AGREEMENT, NOT ATTRIBUTABLE TO ANY COMPANY\n\nIllustrative customer master services agreement summary, used to exercise the Legal Risk\nAgent on contractual material that has no statutory filing. Financial figures are never\ntaken from this folder; those come from the target's filed iXBRL accounts.\n\n1. TERM AND TERMINATION\n   The agreement includes a change of control consent requirement. Either party may\n   terminate if the counterparty assigns the agreement without prior written consent.\n\n2. INDEMNITY\n   The customer requests an uncapped indemnity for confidentiality breaches.\n\n3. GOVERNING LAW\n   England and Wales.\n",
+        "char_count": 653,
+        "truncated": false,
+        "armor_verdict": "ALLOW",
+        "armor_redactions": [],
+        "quarantined": false
+      }
+    ],
+    "errors": [],
+    "supported_extensions": [
+      ".csv",
+      ".md",
+      ".pdf",
+      ".txt"
+    ],
+    "armor_findings": [],
+    "armor_blocked": 0
+  },
+  "ingestion_errors": [],
+  "memory": {
+    "crn": "03994971",
+    "prior_audits": [
+      {
+        "run_id": "20260815T185344527362Z",
+        "crn": "03994971",
+        "created_at": "2026-08-15T18:54:11.602897+00:00",
+        "recommendation": "PROCEED WITH CAUTION",
+        "executive_summary": "Autonomous statutory due diligence completed against Companies House data available to the tool layer.",
+        "severity_counts": {
+          "HIGH": 0,
+          "MEDIUM": 2,
+          "LOW": 4,
+          "CLEAR": 2
+        },
+        "facts": {
+          "company_name": "THIRD PARTY FORMATIONS LIMITED",
+          "company_status": "active",
+          "accounts_overdue": false,
+          "accounts_next_due": "2027-02-28",
+          "net_assets": 5558.0,
+          "accounts_period_end": "2025-05-31",
+          "charge_count": 0,
+          "insolvency_cases": 0,
+          "psc_count": 1
+        },
+        "trace_id": "ea6aa638f809cedcfabdc040b7f7ce2d"
+      },
+      {
+        "run_id": "20260815T185233508414Z",
+        "crn": "03994971",
+        "created_at": "2026-08-15T18:53:24.476521+00:00",
+        "recommendation": "PROCEED WITH CAUTION",
+        "executive_summary": "Autonomous statutory due diligence completed against Companies House data available to the tool layer.",
+        "severity_counts": {
+          "HIGH": 0,
+          "MEDIUM": 5,
+          "LOW": 0,
+          "CLEAR": 3
+        },
+        "facts": {
+          "company_name": "THIRD PARTY FORMATIONS LIMITED",
+          "company_status": "active",
+          "accounts_overdue": false,
+          "accounts_next_due": "2027-02-28",
+          "net_assets": 5558.0,
+          "accounts_period_end": "2025-05-31",
+          "charge_count": 0,
+          "insolvency_cases": 0,
+          "psc_count": 1
+        },
+        "trace_id": "9ace9f04fe4592fd79bac72962c214cc"
+      }
+    ],
+    "operator_notes": [],
+    "changes_since_last_audit": [],
+    "is_first_audit": false,
+    "current_facts": {
+      "company_name": "THIRD PARTY FORMATIONS LIMITED",
+      "company_status": "active",
+      "accounts_overdue": false,
+      "accounts_next_due": "2027-02-28",
+      "net_assets": 5558.0,
+      "accounts_period_end": "2025-05-31",
+      "charge_count": 0,
+      "insolvency_cases": 0,
+      "psc_count": 1
+    }
+  },
+  "legal_risks": {
+    "risks": [
+      {
+        "category": "Insolvency",
+        "severity": "CLEAR",
+        "finding": "No insolvency endpoint record found.",
+        "evidentiary_quote": "Companies House insolvency endpoint returned 404.",
+        "evidence_verified": true
+      },
+      {
+        "category": "Registered Charges",
+        "severity": "CLEAR",
+        "finding": "0 registered charge(s) returned. Endpoint status: success.",
+        "evidentiary_quote": "charges.total_count",
+        "evidence_verified": false,
+        "evidence_note": "Citation could not be matched to the retrieved payload."
+      },
+      {
+        "category": "Beneficial Ownership",
+        "severity": "LOW",
+        "finding": "PSC endpoint status: success; PSC item count: 1.",
+        "evidentiary_quote": "persons-with-significant-control",
+        "evidence_verified": true
+      }
+    ],
+    "overall_legal_status": "Review required",
+    "limitations": [
+      "Model call failed (RuntimeError); used deterministic fallback analysis."
+    ],
+    "model_used": "deterministic-fallback"
+  },
+  "financial_analysis": {
+    "findings": [
+      {
+        "category": "Company Status",
+        "severity": "LOW",
+        "finding": "Company status is active; accounts overdue=False; next due=2027-02-28.",
+        "evidentiary_quote": "company_name=THIRD PARTY FORMATIONS LIMITED; company_status=active; date_of_creation=2000-05-16; jurisdiction=england-wales; accounts.next_due=2027-02-28; accounts.overdue=False",
+        "evidence_verified": true
+      },
+      {
+        "category": "Filing History",
+        "severity": "LOW",
+        "finding": "Filing endpoint status: success; 10 filing item(s) sampled.",
+        "evidentiary_quote": "2026-02-20: accounts/accounts-with-accounts-type-micro-entity; 2025-02-27: accounts/accounts-with-accounts-type-micro-entity; 2024-02-29: accounts/accounts-with-accounts-type-total-exemption-full; 2023-02-28: accounts/accounts-with-accounts-type-total-exemption-full; 2022-02-28: accounts/accounts-with-accounts-type-total-exemption-full",
+        "evidence_verified": true
+      },
+      {
+        "category": "Balance Sheet",
+        "severity": "LOW",
+        "finding": "Balance sheet at 2025-05-31 from the 2026-02-20 filing: current_assets=1,688, creditors_within_one_year=-3,870, net_current_assets=5,558, total_assets_less_current_liabilities=5,558, net_assets=5,558, equity=5,558, working_capital=5,558.",
+        "evidentiary_quote": "NetAssetsLiabilities@FY_END_20250531 (filing 2026-02-20)",
+        "evidence_verified": true
+      },
+      {
+        "category": "Accounts Signal: Filing Internally Inconsistent",
+        "severity": "MEDIUM",
+        "finding": "The filed accounts fail 1 balance sheet identity check(s) (working_capital). Liquidity ratios are unreliable for this filing and require manual verification against the source document.",
+        "evidentiary_quote": "current_assets - creditors_within_one_year = net_current_assets -> expected -2,182, filed 5,558",
+        "evidence_verified": true
+      },
+      {
+        "category": "Accounts Signal: Net Assets Declining",
+        "severity": "MEDIUM",
+        "finding": "Net assets fell by 22,224 between 2024-05-31 and 2025-05-31.",
+        "evidentiary_quote": "NetAssetsLiabilities@FY_END_20250531",
+        "evidence_verified": true
+      }
+    ],
+    "accounts_status": "not_overdue_or_unknown",
+    "overall_financial_status": "Review required",
+    "limitations": [
+      "Model call failed (RuntimeError); used deterministic fallback analysis."
+    ],
+    "model_used": "deterministic-fallback"
+  },
+  "debate_transcript": {
+    "points": [
+      {
+        "issue": "Statutory risk versus deal momentum",
+        "legal_view": "Review required",
+        "financial_view": "Review required",
+        "resolved_position": "Escalate any non-clear statutory or filing signal to a human deal team before reliance.",
+        "severity": "MEDIUM"
+      }
+    ],
+    "risk_reward_summary": "Fallback debate completed from retrieved structured data.",
+    "model_used": "deterministic-fallback",
+    "limitations": [
+      "Model call failed (RuntimeError); used deterministic fallback analysis."
+    ]
+  },
+  "red_flag_verdict": {
+    "recommendation": "PROCEED WITH CAUTION",
+    "executive_summary": "Autonomous statutory due diligence completed against Companies House data available to the tool layer.",
+    "top_risks": [
+      "The filed accounts fail 1 balance sheet identity check(s) (working_capital). Liquidity ratios are unreliable for this filing and require manual verification against the source document.",
+      "Net assets fell by 22,224 between 2024-05-31 and 2025-05-31.",
+      "Unspecified risk"
+    ],
+    "required_human_review": [
+      "Validate findings against source filings before transaction reliance."
+    ],
+    "reliance_disclaimer": "AI-generated due diligence support only. Not legal, financial, tax, or investment advice; qualified professionals must verify source records before transaction reliance.",
+    "model_used": "deterministic-fallback",
+    "limitations": [
+      "Model call failed (RuntimeError); used deterministic fallback analysis."
+    ],
+    "armor_verdict": "ALLOW",
+    "armor_violations": []
+  },
+  "governance": {
+    "trace_id": "bc0398da5123d2802e1f656f2639156b",
+    "models_used": [
+      "deterministic-fallback"
+    ],
+    "model_errors": [
+      "gemini-3.5-flash: ClientError",
+      "gemini-3.5-flash: ClientError",
+      "gemini-3.5-pro: ClientError",
+      "gemini-3.5-pro: ClientError",
+      "gemini-3.5-flash: ClientError",
+      "gemini-3.5-flash: ClientError",
+      "gemini-3.5-pro: ClientError",
+      "gemini-3.5-pro: ClientError",
+      "gemini-3.5-flash: ClientError",
+      "gemini-3.5-flash: ClientError",
+      "gemini-3.5-pro: ClientError",
+      "gemini-3.5-pro: ClientError",
+      "gemini-3.5-flash: ClientError",
+      "gemini-3.5-pro: ClientError",
+      "gemini-3.5-flash: ClientError",
+      "gemini-3.5-pro: ClientError",
+      "gemini-3.5-flash: ClientError",
+      "gemini-3.5-pro: ClientError",
+      "gemini-3.5-flash: ClientError",
+      "gemini-3.5-pro: ClientError",
+      "gemini-3.5-flash: ClientError",
+      "gemini-3.5-pro: ClientError",
+      "gemini-3.5-flash: ClientError",
+      "gemini-3.5-pro: ClientError"
+    ],
+    "severity_counts": {
+      "HIGH": 0,
+      "MEDIUM": 2,
+      "LOW": 4,
+      "CLEAR": 2
+    },
+    "memory_written": true,
+    "armor_verdict": "ALLOW",
+    "armor_violations": [],
+    "documents_quarantined": 0,
+    "unverified_citations": 1,
+    "registry_versions": {
+      "debate": "1.0.0",
+      "financial_auditor": "1.2.0",
+      "legal_risk": "1.1.0",
+      "orchestrator": "1.3.0",
+      "synthesizer": "1.0.0"
+    }
+  }
+}
