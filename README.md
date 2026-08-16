@@ -98,6 +98,20 @@ Fleet console (recommended for the demo):
 python -m streamlit run dashboard.py
 ```
 
+The console is a **client**, not the fleet. With no configuration it runs the graph
+in-process; set `FLEET_API_URL` and it drives a deployed control plane instead, sharing
+that fleet's job store, memory bank, and audit chain:
+
+```powershell
+$env:FLEET_API_URL="https://due-diligence-direct-851846322517.europe-west1.run.app"
+$env:FLEET_API_TOKEN=$(gcloud auth print-identity-token)   # or run it in Cloud Shell
+python -m streamlit run dashboard.py
+```
+
+Deployed on Cloud Run, the console authenticates through the metadata server automatically -
+no token to supply, provided its service account holds the Cloud Run Invoker role on the
+control plane. The sidebar shows which backend is active.
+
 CLI, inline:
 
 ```powershell

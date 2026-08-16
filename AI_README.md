@@ -45,7 +45,8 @@ Auditor} in parallel -> Debate -> Synthesizer.
 | `runtime.py` | Async job execution, durable job state, events, cancellation, reconciliation. |
 | `telemetry.py` | OTel spans, exporters, hash-chained audit log and verifier. |
 | `service.py` | Starlette control plane for Cloud Run. |
-| `dashboard.py` | Streamlit fleet console: live job, governance, registry, audit, memory. |
+| `fleet_client.py` | Backend abstraction: `RemoteBackend` (HTTP control plane) or `LocalBackend` (in-process), selected by `FLEET_API_URL`. |
+| `dashboard.py` | Streamlit fleet console. A **client** of `fleet_client`, never of the fleet modules directly. |
 | `Dockerfile`, `cloudbuild.yaml` | Cloud Run image and Cloud Build deploy pipeline. |
 | `tests/` | 32 unittest cases; `tests/__init__.py` sandboxes all fleet state paths. |
 | `sample_data_room/`, `sample_data_room_hostile/` | Clean and poisoned demo fixtures. |
@@ -98,8 +99,11 @@ Auditor} in parallel -> Debate -> Synthesizer.
   processes can append to one verifiable chain.
 - SQLite connections use the `_db()` context manager in each module; plain `_connect()`
   inside a `with` leaks the connection and raises ResourceWarnings.
-- Streamlit live job panel uses `@st.fragment(run_every=2)`; the dashboard is a runtime
-  client and must not call the graph directly.
+- Streamlit live job panel uses `@st.fragment(run_every=2)`.
+- The dashboard must go through `fleet_client`, never import `runtime`, `telemetry`,
+  `agent_registry`, `memory_bank`, or `orchestrator` directly. That indirection is what lets
+  one console drive either a local fleet or the deployed Cloud Run control plane.
+- Remote mode cannot accept uploads: the control plane reads data rooms from its own disk.
 
 ## Verification Commands
 
@@ -129,6 +133,27 @@ python -c "import json, mcp_server; print(json.dumps(mcp_server.analyze_statutor
   (down 79.99% YoY), working capital identity failure detected and the current ratio suppressed.
 - 2026-08-16: the Gemini free-tier quota returned HTTP 429 during testing. The run completed on
   the deterministic engine with identical figures and citations, which is the intended behaviour.
+
+## Deployed Environment (verified 2026-08-16)
+
+- Cloud Run service `due-diligence-direct`, region `europe-west1`, project
+  `project-bfe615da-0bb9-4219-bdb` (number 851846322517).
+- URL: https://due-diligence-direct-851846322517.europe-west1.run.app - requires an IAM
+  identity token (`--no-allow-unauthenticated`).
+- Runtime identity is the compute default service account, holding
+  `secretmanager.secretAccessor`, `aiplatform.user`, `run.admin`, `artifactregistry.writer`,
+  `logging.logWriter`, `iam.serviceAccountUser`.
+- Deploys via a Cloud Build trigger on push to `main` (the console flow builds the
+  Dockerfile directly; `cloudbuild.yaml` is the CLI equivalent).
+- **Model access in production is Vertex AI, not an API key**: `GOOGLE_GENAI_USE_VERTEXAI=true`,
+  `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION=global`.
+- **`GOOGLE_CLOUD_LOCATION=europe-west1` does not serve `gemini-3.5-flash`** and returns
+  `model_unavailable`. `global` works. Do not "fix" this by moving to a US region; that would
+  send UK statutory data outside Europe for no benefit.
+- Google Cloud services in use: Cloud Run, Vertex AI, Cloud Build, Artifact Registry,
+  Secret Manager, Cloud Trace.
+- Fleet state (registry, memory, jobs, audit log, checkpoints) is SQLite on the container's
+  ephemeral disk, so **max-instances must stay at 1** or job state fragments across instances.
 
 ## Known Operational Notes
 

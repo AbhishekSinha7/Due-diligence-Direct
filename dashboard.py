@@ -8,20 +8,15 @@ audit trail, the registry, and cross-session memory while the fleet works.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import streamlit as st
 from pydantic import ValidationError
 
-import agent_identity
-import agent_registry
 import data_room_loader
-import gateway
+import fleet_client
 import mcp_server
-import memory_bank
-import orchestrator
-import runtime
-import telemetry
 
 st.set_page_config(page_title="DueDiligence Direct - Fleet Console", layout="wide")
 
@@ -39,15 +34,18 @@ RECOMMENDATION_COLORS = {
 }
 
 
+# Terminal job states, mirrored here so the console needs no runtime import.
+TERMINAL_STATUSES = {"SUCCEEDED", "FAILED", "CANCELLED", "INTERRUPTED"}
+
+
 @st.cache_resource
-def bootstrap() -> dict:
-    telemetry.configure_telemetry()
-    fleet = orchestrator.bootstrap_fleet()
-    runtime.reconcile_interrupted_jobs()
-    return fleet
+def get_backend(api_url: str):
+    """Connect to a control plane, or run the fleet locally when none is set."""
+
+    return fleet_client.get_backend(api_url)
 
 
-bootstrap()
+backend = get_backend(fleet_client.FLEET_API_URL)
 
 
 def badge(text: str, color: str, size: int = 12) -> str:
@@ -318,7 +316,7 @@ def render_report(state: dict) -> None:
         trace_id = governance.get("trace_id")
         if trace_id:
             st.markdown("**Audit records for this run**")
-            records = telemetry.read_audit(limit=500, trace_id=trace_id)
+            records = backend.audit(limit=500, trace_id=trace_id)
             st.dataframe(
                 [
                     {
@@ -420,7 +418,7 @@ def render_report(state: dict) -> None:
 
 @st.fragment(run_every=2)
 def render_live_job(job_id: str) -> None:
-    job = runtime.get_job(job_id)
+    job = backend.get_job(job_id)
     if job is None:
         st.error(f"Job {job_id} not found.")
         return
@@ -429,22 +427,22 @@ def render_live_job(job_id: str) -> None:
     header.markdown(
         f"**Job {job['job_id']}** for CRN {job['crn']} - status {job['status']}",
     )
-    if job["status"] not in runtime.TERMINAL_STATUSES:
+    if job["status"] not in TERMINAL_STATUSES:
         if control.button("Cancel job", key=f"cancel-{job_id}"):
-            runtime.cancel_job(job_id)
+            backend.cancel_job(job_id)
         st.progress(min(len(job["events"]) / 10, 0.95), text="Fleet working in the background")
 
     for event in job["events"]:
         st.write(f"`{event['timestamp']}` **{event['stage']}** - {event['message']}")
 
-    if job["status"] == runtime.STATUS_SUCCEEDED and job["result"]:
+    if job["status"] == "SUCCEEDED" and job["result"]:
         st.success("Audit complete")
         render_report(job["result"])
-    elif job["status"] == runtime.STATUS_FAILED:
+    elif job["status"] == "FAILED":
         st.error(job["error"] or "Job failed")
-    elif job["status"] == runtime.STATUS_CANCELLED:
+    elif job["status"] == "CANCELLED":
         st.warning("Job cancelled by operator")
-    elif job["status"] == runtime.STATUS_INTERRUPTED:
+    elif job["status"] == "INTERRUPTED":
         st.warning("Job was interrupted by a process restart")
 
 
@@ -458,17 +456,44 @@ with st.sidebar:
     st.subheader("Run an audit")
     crn = st.text_input("Company number", value="03994971", max_chars=8)
     data_room_label = st.selectbox("Data room", list(DATA_ROOM_CHOICES))
-    uploaded_files = st.file_uploader(
-        "Or upload deal documents", type=["csv", "md", "pdf", "txt"], accept_multiple_files=True
+    uploaded_files = (
+        st.file_uploader(
+            "Or upload deal documents", type=["csv", "md", "pdf", "txt"], accept_multiple_files=True
+        )
+        if backend.supports_uploads()
+        else None
     )
+    if not backend.supports_uploads():
+        st.caption(
+            "Uploads are disabled against a remote control plane: the fleet reads data rooms "
+            "from its own filesystem."
+        )
     run_clicked = st.button("Submit to Agent Runtime", type="primary", width="stretch")
 
     st.divider()
-    st.subheader("Fleet")
-    stats = runtime.fleet_stats()
-    st.metric("Jobs in flight", stats["in_flight"])
-    st.metric("Jobs recorded", stats["total"])
-    st.caption(f"Runtime workers: {stats['workers']}")
+    st.subheader("Backend")
+    try:
+        fleet_info = backend.fleet()
+        backend_error = ""
+    except Exception as exc:
+        fleet_info = {}
+        backend_error = str(exc)
+
+    st.markdown(
+        badge(
+            "CLOUD RUN" if backend.mode == "remote" else "LOCAL",
+            "#1d4ed8" if backend.mode == "remote" else "#475569",
+        ),
+        unsafe_allow_html=True,
+    )
+    st.caption(backend.description)
+    if backend_error:
+        st.error(backend_error)
+
+    stats = fleet_info.get("runtime", {"workers": 0, "total": 0, "in_flight": 0})
+    st.metric("Jobs in flight", stats.get("in_flight", 0))
+    st.metric("Jobs recorded", stats.get("total", 0))
+    st.caption(f"Runtime workers: {stats.get('workers', 0)}")
 
 if run_clicked:
     try:
@@ -483,7 +508,7 @@ if run_clicked:
         data_room_path = "data_room/uploads"
         st.toast(f"Saved {len(saved)} uploaded file(s)")
 
-    st.session_state["job_id"] = runtime.submit_job(
+    st.session_state["job_id"] = backend.submit_job(
         query.crn, data_room_path=data_room_path, submitted_by="dashboard"
     )
 
@@ -497,7 +522,7 @@ with console:
         render_live_job(active_job)
     else:
         st.info("Submit an audit from the sidebar. The run executes in the background runtime.")
-        recent = runtime.list_jobs(limit=10)
+        recent = backend.list_jobs(limit=10)
         if recent:
             st.markdown("**Recent jobs**")
             st.dataframe(
@@ -526,7 +551,7 @@ with fleet_tab:
                 "tools": ", ".join(card["tools"]),
                 "model": card["model"],
             }
-            for card in agent_registry.list_agents(include_retired=True)
+            for card in fleet_info.get("agents", [])
         ],
         hide_index=True,
         width="stretch",
@@ -540,17 +565,17 @@ with fleet_tab:
                 "scopes": ", ".join(identity["scopes"]),
                 "service_account": identity["service_account"],
             }
-            for identity in agent_identity.fleet_roster()
+            for identity in fleet_info.get("identities", [])
         ],
         hide_index=True,
         width="stretch",
     )
     right.markdown("#### Gateway tool policies")
-    right.dataframe(gateway.registered_tools(), hide_index=True, width="stretch")
-    right.caption(f"Allowed egress hosts: {', '.join(gateway.allowed_hosts())}")
+    right.dataframe(fleet_info.get("tools", []), hide_index=True, width="stretch")
+    right.caption(f"Allowed egress hosts: {', '.join(fleet_info.get('allowed_egress_hosts', []))}")
 
 with audit_tab:
-    verification = telemetry.verify_audit_chain()
+    verification = backend.verify_audit()
     if verification["valid"]:
         st.success(
             f"Audit chain verified across {verification['records']} record(s). "
@@ -559,7 +584,7 @@ with audit_tab:
     else:
         st.error(f"Audit chain broken at record {verification.get('broken_at')}")
 
-    records = telemetry.read_audit(limit=300)
+    records = backend.audit(limit=300)
     st.dataframe(
         [
             {
@@ -577,8 +602,14 @@ with audit_tab:
         width="stretch",
         height=420,
     )
-    span_log = Path(telemetry.SPAN_LOG_PATH)
-    if span_log.exists():
+    # Span files live on the fleet's own disk, so they are only readable locally.
+    span_log = Path(os.getenv("FLEET_TELEMETRY_DIR", "telemetry")) / "spans.jsonl"
+    if backend.mode == "remote":
+        st.caption(
+            "OpenTelemetry spans for this fleet are exported to Cloud Trace; look up a run by "
+            "its trace id there."
+        )
+    elif span_log.exists():
         with st.expander("Latest OpenTelemetry spans"):
             lines = span_log.read_text(encoding="utf-8").strip().splitlines()[-25:]
             st.json([json.loads(line) for line in lines if line.strip()])
@@ -586,7 +617,7 @@ with audit_tab:
 with memory_tab:
     lookup_crn = st.text_input("Company number to recall", value=crn, max_chars=8, key="memory-crn")
     if lookup_crn:
-        memory = memory_bank.recall(lookup_crn, actor="dashboard")
+        memory = backend.memory(lookup_crn)
         st.markdown("#### Prior audits")
         st.dataframe(
             [
@@ -608,5 +639,5 @@ with memory_tab:
             st.write(f"`{note['created_at']}` **{note['author']}**: {note['note']}")
         new_note = st.text_area("Add an operator note (persists across sessions)", key="memory-note")
         if st.button("Save note") and new_note.strip():
-            memory_bank.add_note(lookup_crn, new_note.strip(), author="dashboard")
+            backend.add_note(lookup_crn, new_note.strip(), author="dashboard")
             st.rerun()
