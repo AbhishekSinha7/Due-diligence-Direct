@@ -244,7 +244,10 @@ def _invoke_model(schema_name: str, prompt: str, response_schema: type[BaseModel
             continue
 
     cause = classify_model_error(last_error) if last_error else "unknown"
-    raise RuntimeError(f"all_model_candidates_failed:{cause}: {last_error}")
+    message = f"all_model_candidates_failed:{cause}: {last_error}"
+    if cause in {"quota_exhausted", "model_unavailable", "credentials_rejected"}:
+        raise gateway.TerminalToolError(message)
+    raise RuntimeError(message)
 
 
 gateway.register_tool(
@@ -659,7 +662,8 @@ def _fallback_deal(
         recommendation = "GREEN LIGHT"
 
     top_risks = [
-        item.get("finding", "Unspecified risk")
+        # Legal and financial items carry `finding`; debate points carry `resolved_position`.
+        item.get("finding") or item.get("resolved_position") or item.get("issue") or "Unspecified risk"
         for item in all_items
         if item.get("severity") in {"HIGH", "MEDIUM"}
     ][:5]
@@ -1017,10 +1021,31 @@ Return JSON matching the requested schema.
             recommendation=report["recommendation"],
         )
 
+        # Attribute each agent's output to the model that actually produced it, so a
+        # partial outage cannot be read as a clean model-generated report.
+        agent_models = {
+            "legal_risk": legal.get("model_used", "unknown"),
+            "financial_auditor": financial.get("model_used", "unknown"),
+            "debate": debate.get("model_used", "unknown"),
+            "synthesizer": report.get("model_used", "unknown"),
+        }
+        fell_back = sorted(
+            agent for agent, model in agent_models.items() if model == "deterministic-fallback"
+        )
+
         governance = {
             "trace_id": ids["trace_id"],
             "models_used": sorted(set(context.models_used)) or ["deterministic-fallback"],
-            "model_errors": context.model_errors,
+            "agent_models": agent_models,
+            "agents_on_deterministic_fallback": fell_back,
+            "analysis_mode": (
+                "deterministic"
+                if len(fell_back) == len(agent_models)
+                else "mixed"
+                if fell_back
+                else "model"
+            ),
+            "model_errors": sorted(set(context.model_errors)),
             "severity_counts": counts,
             "memory_written": memory_written,
             "armor_verdict": report.get("armor_verdict", model_armor.VERDICT_ALLOW),
@@ -1194,7 +1219,12 @@ def _print_report(final_state: DueDiligenceState) -> None:
         print(f"- {risk}")
     print("\nGovernance:")
     print(f"- trace_id: {governance.get('trace_id', 'n/a')}")
+    print(f"- analysis mode: {governance.get('analysis_mode', 'unknown')}")
     print(f"- models: {', '.join(governance.get('models_used', []))}")
+    if governance.get("agents_on_deterministic_fallback"):
+        print(
+            f"- agents on deterministic fallback: {', '.join(governance['agents_on_deterministic_fallback'])}"
+        )
     print(f"- documents quarantined by Model Armor: {governance.get('documents_quarantined', 0)}")
     print(f"- citations failing the grounding audit: {governance.get('unverified_citations', 0)}")
     print(f"\n{report['reliance_disclaimer']}")

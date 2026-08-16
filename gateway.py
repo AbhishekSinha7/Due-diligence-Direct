@@ -48,6 +48,15 @@ class PolicyViolation(Exception):
     """Raised when the gateway refuses a call."""
 
 
+class TerminalToolError(Exception):
+    """A tool failure that retrying cannot fix.
+
+    Quota exhaustion, a retired model id, and rejected credentials are permanent
+    for the duration of a run. Retrying them wastes the operator's time and
+    pollutes the audit log, so the gateway fails fast instead.
+    """
+
+
 @dataclass
 class ToolPolicy:
     name: str
@@ -167,6 +176,18 @@ def call(agent_id: str, tool_name: str, /, **kwargs: Any) -> Any:
         for attempt in range(1, MAX_ATTEMPTS + 1):
             try:
                 result = policy.handler(**kwargs)
+            except TerminalToolError as exc:
+                # Permanent for this run: surface it immediately.
+                last_error = exc
+                telemetry.audit(
+                    "gateway.terminal_error",
+                    actor=claims["sub"],
+                    resource=f"tool://{tool_name}",
+                    decision="error",
+                    severity="ERROR",
+                    attributes={"attempt": attempt, "error": str(exc)[:200]},
+                )
+                break
             except Exception as exc:
                 last_error = exc
                 if attempt == MAX_ATTEMPTS:
