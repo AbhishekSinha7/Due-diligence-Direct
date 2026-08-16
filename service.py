@@ -72,6 +72,41 @@ def _guard(request: Request) -> JSONResponse | None:
     return JSONResponse({"error": "unauthorized"}, status_code=401)
 
 
+async def index(request: Request) -> JSONResponse:
+    """Service index. Safe to expose: it describes the API, never the data."""
+
+    agents = agent_registry.list_agents()
+    return JSONResponse(
+        {
+            "service": telemetry.SERVICE_NAME,
+            "description": (
+                "Governed multi-agent M&A due diligence fleet over UK Companies House "
+                "statutory records and filed iXBRL accounts."
+            ),
+            "version": telemetry.SERVICE_VERSION,
+            "environment": os.getenv("FLEET_ENVIRONMENT", "local"),
+            "region": os.getenv("FLEET_DATA_REGION", "unset"),
+            "model": os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
+            "agents_registered": len(agents),
+            "agents": [f"{card['agent_id']}@{card['version']}" for card in agents],
+            "endpoints": {
+                "GET /healthz": "liveness probe",
+                "GET /readyz": "readiness and dependency status",
+                "GET /fleet": "agent cards, identities, tool policies, runtime stats",
+                "POST /jobs": "submit an audit: {\"crn\": \"03994971\"} -> job id",
+                "GET /jobs": "recent jobs",
+                "GET /jobs/{job_id}": "status, stage events, final report",
+                "POST /jobs/{job_id}/cancel": "cooperative cancellation",
+                "GET /memory/{crn}": "prior audits, notes, tracked-fact deltas",
+                "POST /memory/{crn}/notes": "add an operator note",
+                "GET /audit": "audit records (?trace_id= to filter)",
+                "GET /audit/verify": "recompute the audit hash chain",
+            },
+            "source": "https://github.com/AbhishekSinha7/Due-diligence-Direct",
+        }
+    )
+
+
 async def healthz(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok", "service": telemetry.SERVICE_NAME})
 
@@ -217,6 +252,7 @@ app = Starlette(
     debug=False,
     lifespan=lifespan,
     routes=[
+        Route("/", index),
         Route("/healthz", healthz),
         Route("/readyz", readyz),
         Route("/fleet", fleet),
