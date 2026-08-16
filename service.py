@@ -24,9 +24,14 @@ Endpoints:
 
 from __future__ import annotations
 
+import base64
+import binascii
 import contextlib
 import json
 import os
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from starlette.applications import Starlette
@@ -93,6 +98,7 @@ async def index(request: Request) -> JSONResponse:
                 "GET /healthz": "liveness probe",
                 "GET /readyz": "readiness and dependency status",
                 "GET /fleet": "agent cards, identities, tool policies, runtime stats",
+                "POST /data-rooms": "upload deal documents -> data_room_path",
                 "POST /jobs": "submit an audit: {\"crn\": \"03994971\"} -> job id",
                 "GET /jobs": "recent jobs",
                 "GET /jobs/{job_id}": "status, stage events, final report",
@@ -139,6 +145,82 @@ async def fleet(request: Request) -> JSONResponse:
             "allowed_egress_hosts": list(gateway.allowed_hosts()),
             "runtime": runtime.fleet_stats(),
         }
+    )
+
+
+MAX_UPLOAD_BYTES = int(os.getenv("FLEET_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
+MAX_UPLOAD_FILES = int(os.getenv("FLEET_MAX_UPLOAD_FILES", "25"))
+UPLOAD_ROOT = Path(os.getenv("FLEET_UPLOAD_ROOT", "data_room/uploads"))
+ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".md", ".pdf", ".txt"}
+
+
+async def upload_data_room(request: Request) -> JSONResponse:
+    """Accept deal documents and return the data room path to audit against.
+
+    Files are written to a per-upload folder on the fleet's own disk, which is
+    what the ingestion tool reads. Uploads are untrusted by definition, so this
+    endpoint only stores them; Model Armor screens the contents at ingestion.
+    """
+
+    if (denied := _guard(request)) is not None:
+        return denied
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+    files = payload.get("files")
+    if not isinstance(files, list) or not files:
+        return JSONResponse({"error": "files must be a non-empty list"}, status_code=400)
+    if len(files) > MAX_UPLOAD_FILES:
+        return JSONResponse(
+            {"error": f"at most {MAX_UPLOAD_FILES} files per upload"}, status_code=413
+        )
+
+    room_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    root = UPLOAD_ROOT / room_id
+    stored: list[dict[str, Any]] = []
+    total_bytes = 0
+
+    for entry in files:
+        if not isinstance(entry, dict):
+            return JSONResponse({"error": "each file must be an object"}, status_code=400)
+
+        # Strip any path component: an upload must never choose its own location.
+        name = Path(str(entry.get("name", ""))).name
+        if not name:
+            return JSONResponse({"error": "each file needs a name"}, status_code=400)
+        suffix = Path(name).suffix.lower()
+        if suffix not in ALLOWED_UPLOAD_EXTENSIONS:
+            return JSONResponse(
+                {"error": f"unsupported file type {suffix or name}"}, status_code=415
+            )
+
+        try:
+            content = base64.b64decode(str(entry.get("content_base64", "")), validate=True)
+        except (binascii.Error, ValueError):
+            return JSONResponse({"error": f"{name}: content_base64 is not valid base64"}, status_code=400)
+
+        total_bytes += len(content)
+        if total_bytes > MAX_UPLOAD_BYTES:
+            return JSONResponse(
+                {"error": f"upload exceeds {MAX_UPLOAD_BYTES} bytes"}, status_code=413
+            )
+
+        root.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes(content)
+        stored.append({"file_name": name, "bytes": len(content)})
+
+    telemetry.audit(
+        "data_room.upload",
+        actor=str(payload.get("submitted_by", "api")),
+        resource=f"data_room://{room_id}",
+        decision="allow",
+        attributes={"files": len(stored), "bytes": total_bytes},
+    )
+    return JSONResponse(
+        {"data_room_path": str(root).replace("\\", "/"), "room_id": room_id, "files": stored},
+        status_code=201,
     )
 
 
@@ -256,6 +338,7 @@ app = Starlette(
         Route("/healthz", healthz),
         Route("/readyz", readyz),
         Route("/fleet", fleet),
+        Route("/data-rooms", upload_data_room, methods=["POST"]),
         Route("/jobs", submit, methods=["POST"]),
         Route("/jobs", jobs, methods=["GET"]),
         Route("/jobs/{job_id}", job_detail),

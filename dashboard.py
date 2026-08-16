@@ -14,7 +14,6 @@ from pathlib import Path
 import streamlit as st
 from pydantic import ValidationError
 
-import data_room_loader
 import fleet_client
 import mcp_server
 
@@ -456,18 +455,16 @@ with st.sidebar:
     st.subheader("Run an audit")
     crn = st.text_input("Company number", value="03994971", max_chars=8)
     data_room_label = st.selectbox("Data room", list(DATA_ROOM_CHOICES))
-    uploaded_files = (
-        st.file_uploader(
-            "Or upload deal documents", type=["csv", "md", "pdf", "txt"], accept_multiple_files=True
-        )
-        if backend.supports_uploads()
-        else None
+    uploaded_files = st.file_uploader(
+        "Or upload deal documents (contracts, side letters)",
+        type=["csv", "md", "pdf", "txt"],
+        accept_multiple_files=True,
+        help=(
+            "Uploaded documents are sent to the fleet, screened by Model Armor, and used "
+            "instead of the selected data room. Financial figures always come from the "
+            "company's filed accounts, never from these files."
+        ),
     )
-    if not backend.supports_uploads():
-        st.caption(
-            "Uploads are disabled against a remote control plane: the fleet reads data rooms "
-            "from its own filesystem."
-        )
     run_clicked = st.button("Submit to Agent Runtime", type="primary", width="stretch")
 
     st.divider()
@@ -504,9 +501,14 @@ if run_clicked:
 
     data_room_path = DATA_ROOM_CHOICES[data_room_label]
     if uploaded_files:
-        saved = data_room_loader.save_uploaded_files(uploaded_files)
-        data_room_path = "data_room/uploads"
-        st.toast(f"Saved {len(saved)} uploaded file(s)")
+        try:
+            data_room_path = backend.upload_data_room(
+                [(item.name, item.getvalue()) for item in uploaded_files]
+            )
+            st.toast(f"Uploaded {len(uploaded_files)} document(s) to the fleet")
+        except Exception as exc:
+            st.error(f"Upload failed: {exc}")
+            st.stop()
 
     st.session_state["job_id"] = backend.submit_job(
         query.crn, data_room_path=data_room_path, submitted_by="dashboard"

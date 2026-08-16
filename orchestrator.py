@@ -498,6 +498,75 @@ def _accounts_findings(accounts: dict[str, Any]) -> list[dict[str, str]]:
     return findings
 
 
+# Clause patterns that matter in an acquisition, with the severity a deal team
+# would attach to them. Used when no model is available, so an uploaded contract
+# is never silently ignored.
+CLAUSE_PATTERNS: tuple[tuple[str, str, str], ...] = (
+    ("change of control", "HIGH", "Change of Control"),
+    ("uncapped indemnit", "HIGH", "Uncapped Indemnity"),
+    ("unlimited liabilit", "HIGH", "Unlimited Liability"),
+    ("termination for convenience", "MEDIUM", "Termination for Convenience"),
+    ("without prior written consent", "MEDIUM", "Assignment Restriction"),
+    ("exclusivit", "MEDIUM", "Exclusivity"),
+    ("non-compete", "MEDIUM", "Non-Compete"),
+    ("liquidated damages", "MEDIUM", "Liquidated Damages"),
+    ("automatically renew", "LOW", "Auto-Renewal"),
+    ("governing law", "LOW", "Governing Law"),
+)
+
+
+def _clause_excerpt(text: str, needle: str, width: int = 160) -> str:
+    """Return the sentence-ish window around a matched clause, for citation."""
+
+    lowered = text.lower()
+    index = lowered.find(needle)
+    if index < 0:
+        return needle
+    start = max(0, index - width // 2)
+    end = min(len(text), index + width // 2)
+    return " ".join(text[start:end].split())
+
+
+def _data_room_findings(data_room: dict[str, Any], limit: int = 6) -> list[dict[str, str]]:
+    """Deterministic contract review, so uploads still surface without a model."""
+
+    findings: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for document in data_room.get("documents", []):
+        if document.get("quarantined"):
+            findings.append(
+                {
+                    "category": "Document Integrity",
+                    "severity": "MEDIUM",
+                    "finding": (
+                        f"{document.get('file_name')} was quarantined by Model Armor for attempting "
+                        "to steer the audit, and was excluded from analysis."
+                    ),
+                    "evidentiary_quote": f"model_armor.quarantine:{document.get('file_name')}",
+                }
+            )
+            continue
+
+        text = str(document.get("text_excerpt", ""))
+        lowered = text.lower()
+        for needle, severity, label in CLAUSE_PATTERNS:
+            key = (document.get("file_name", ""), label)
+            if needle not in lowered or key in seen:
+                continue
+            seen.add(key)
+            findings.append(
+                {
+                    "category": f"Contract Term: {label}",
+                    "severity": severity,
+                    "finding": f"{label} clause identified in {document.get('file_name')}.",
+                    "evidentiary_quote": f"{document.get('file_name')}: \"{_clause_excerpt(text, needle)}\"",
+                }
+            )
+
+    return findings[:limit]
+
+
 def _memory_risk_items(memory: dict[str, Any]) -> list[dict[str, str]]:
     """Turn material changes since the last audit into first-class findings."""
 
@@ -514,7 +583,11 @@ def _memory_risk_items(memory: dict[str, Any]) -> list[dict[str, str]]:
     return items
 
 
-def _fallback_legal(bundle: dict[str, Any], memory: dict[str, Any] | None = None) -> dict[str, Any]:
+def _fallback_legal(
+    bundle: dict[str, Any],
+    memory: dict[str, Any] | None = None,
+    data_room: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     risks: list[dict[str, str]] = []
 
     insolvency_status = _status(bundle, "insolvency")
@@ -571,6 +644,7 @@ def _fallback_legal(bundle: dict[str, Any], memory: dict[str, Any] | None = None
         }
     )
 
+    risks.extend(_data_room_findings(data_room or {}))
     risks.extend(_memory_risk_items(memory or {}))
 
     return {
@@ -794,7 +868,9 @@ def legal_risk_agent_node(state: DueDiligenceState) -> DueDiligenceState:
         "agent.legal_risk", agent_id="legal_risk", version=card["version"], crn=state["crn"]
     ):
         context.emit("Legal agent", f"Legal Risk Agent v{card['version']} evaluating statutory liabilities")
-        source_payload = json.dumps(bundle, default=str)
+        source_payload = json.dumps(bundle, default=str) + json.dumps(
+            _armored_documents(state.get("data_room", {})), default=str
+        )
         prompt = f"""
 You are an M&A Legal Risk Agent analyzing UK Companies House statutory data.
 
@@ -821,7 +897,7 @@ Rules:
             "legal_risk",
             LegalAuditReport,
             prompt,
-            fallback=_fallback_legal(bundle, memory),
+            fallback=_fallback_legal(bundle, memory, state.get("data_room", {})),
             temperature=0.0,
         )
         report["risks"] = model_armor.ground_findings(
@@ -857,7 +933,11 @@ def financial_auditor_agent_node(state: DueDiligenceState) -> DueDiligenceState:
             "Financial agent",
             f"Financial Auditor Agent v{card['version']} interpreting filed accounts metrics",
         )
-        source_payload = json.dumps(bundle, default=str) + json.dumps(accounts, default=str)
+        source_payload = (
+            json.dumps(bundle, default=str)
+            + json.dumps(accounts, default=str)
+            + json.dumps(_armored_documents(state.get("data_room", {})), default=str)
+        )
         prompt = f"""
 You are an M&A Financial Auditor Agent.
 

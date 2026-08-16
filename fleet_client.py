@@ -49,7 +49,7 @@ class FleetBackend(Protocol):
     def verify_audit(self) -> dict[str, Any]: ...
     def memory(self, crn: str) -> dict[str, Any]: ...
     def add_note(self, crn: str, note: str, author: str) -> dict[str, Any]: ...
-    def supports_uploads(self) -> bool: ...
+    def upload_data_room(self, files: list[tuple[str, bytes]]) -> str: ...
 
 
 class LocalBackend:
@@ -116,8 +116,19 @@ class LocalBackend:
     def add_note(self, crn: str, note: str, author: str = "dashboard") -> dict[str, Any]:
         return self._memory.add_note(crn, note, author=author)
 
-    def supports_uploads(self) -> bool:
-        return True
+    def upload_data_room(self, files: list[tuple[str, bytes]]) -> str:
+        """Write uploads to a per-upload folder and return its path."""
+
+        import uuid
+        from datetime import datetime, timezone
+        from pathlib import Path
+
+        room_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:6]}"
+        root = Path(os.getenv("FLEET_UPLOAD_ROOT", "data_room/uploads")) / room_id
+        root.mkdir(parents=True, exist_ok=True)
+        for name, content in files:
+            (root / Path(name).name).write_bytes(content)
+        return str(root).replace("\\", "/")
 
 
 class RemoteBackend:
@@ -225,10 +236,20 @@ class RemoteBackend:
     def add_note(self, crn: str, note: str, author: str = "dashboard") -> dict[str, Any]:
         return self._request("POST", f"/memory/{crn}/notes", json={"note": note, "author": author}) or {}
 
-    def supports_uploads(self) -> bool:
-        # The control plane reads data rooms from its own filesystem; uploading
-        # into a remote container would need an object-store handoff.
-        return False
+    def upload_data_room(self, files: list[tuple[str, bytes]]) -> str:
+        """Send documents to the control plane and get back its data room path."""
+
+        import base64
+
+        payload = {
+            "submitted_by": "dashboard",
+            "files": [
+                {"name": name, "content_base64": base64.b64encode(content).decode("ascii")}
+                for name, content in files
+            ],
+        }
+        result = self._request("POST", "/data-rooms", json=payload) or {}
+        return result.get("data_room_path", "data_room")
 
     def health(self) -> dict[str, Any]:
         return self._request("GET", "/readyz") or {}

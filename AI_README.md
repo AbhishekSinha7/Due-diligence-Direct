@@ -48,7 +48,7 @@ Auditor} in parallel -> Debate -> Synthesizer.
 | `fleet_client.py` | Backend abstraction: `RemoteBackend` (HTTP control plane) or `LocalBackend` (in-process), selected by `FLEET_API_URL`. |
 | `dashboard.py` | Streamlit fleet console. A **client** of `fleet_client`, never of the fleet modules directly. |
 | `Dockerfile`, `cloudbuild.yaml` | Cloud Run image and Cloud Build deploy pipeline. |
-| `tests/` | 32 unittest cases; `tests/__init__.py` sandboxes all fleet state paths. |
+| `tests/` | 53 unittest cases; `tests/__init__.py` sandboxes all fleet state paths. |
 | `sample_data_room/`, `sample_data_room_hostile/` | Clean and poisoned demo fixtures. |
 
 ## Financial Data Rules (non-negotiable)
@@ -103,7 +103,13 @@ Auditor} in parallel -> Debate -> Synthesizer.
 - The dashboard must go through `fleet_client`, never import `runtime`, `telemetry`,
   `agent_registry`, `memory_bank`, or `orchestrator` directly. That indirection is what lets
   one console drive either a local fleet or the deployed Cloud Run control plane.
-- Remote mode cannot accept uploads: the control plane reads data rooms from its own disk.
+- Uploads work in both modes: `POST /data-rooms` stores base64 documents on the fleet's disk
+  and returns the `data_room_path` to audit against. Filenames are stripped to their base name
+  (no traversal), extensions are allowlisted, and size/count are capped.
+- Uploaded contracts must surface without a model: `_data_room_findings` does deterministic
+  clause review (change of control, uncapped indemnity, assignment restriction, ...) and feeds
+  `_fallback_legal`. The grounding corpus includes the screened data room, or contract
+  citations would all be marked unverified.
 
 ## Verification Commands
 
