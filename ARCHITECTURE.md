@@ -109,21 +109,30 @@ sequenceDiagram
     Op->>Svc: GET /jobs/{job_id} -> events, report, trace_id
 ```
 
-## 3. Track requirements mapping
+## 3. GEAP component mapping, and how to verify each one
 
-| Track component | Implementation | Where |
+Every component below is implemented and running. The right-hand column is a single
+command that proves it, so none of this has to be taken on trust.
+
+`URL` is the deployed control plane; `TOKEN=$(gcloud auth print-identity-token)`.
+
+| GEAP component | Implementation | Verify it |
 | --- | --- | --- |
-| Agent Registry (publish, version, lifecycle) | SQLite-backed agent cards; `resolve_agent` picks the highest ACTIVE semantic version; ACTIVE / DEPRECATED / RETIRED transitions; capability lookup | `agent_registry.py` |
-| Agent Runtime (async background operation) | Thread-pool runtime with durable SQLite job state, live stage events, cooperative cancellation, restart reconciliation | `runtime.py`, `service.py` |
-| Memory Bank (persistent cross-session context) | Per-company audit history, tracked fact sheet, operator notes, and a significance-scored delta injected into every agent prompt | `memory_bank.py` |
-| Agent Identity | Per-agent principals with scopes and short-lived HMAC-signed tokens; signing key from Secret Manager in production | `agent_identity.py` |
-| Gateway (policy enforcement) | Single choke point: identity, registry lifecycle, published capability, scope, egress allowlist, per-agent quota, retry with backoff; allow and deny both audited | `gateway.py` |
-| Model Armor (guardrails) | Prompt-injection screening and quarantine, credential and PII redaction, deterministic citation grounding, output framing and disclaimer enforcement | `model_armor.py` |
-| OpenTelemetry audit logs | OTel spans per agent stage with fleet attributes, OTLP or Cloud Trace export, plus a hash-chained JSONL audit log with a verifier | `telemetry.py` |
-| Gemini 3.5 | `gemini-3.5-flash` with Pydantic-constrained structured output; documented fallback chain | `orchestrator.py` |
-| Deterministic financials | iXBRL extraction from the company's filed accounts plus ratio, trend, runway, and accounting-identity mathematics in plain Python | `accounts_parser.py`, `mcp_server.py` |
-| Google agent framework | Google GenAI SDK (`google-genai`) driving every agent node | `orchestrator.py` |
-| Google Cloud infrastructure | Cloud Run service, Artifact Registry image, Cloud Build pipeline, Secret Manager secrets, Cloud Trace export | `Dockerfile`, `cloudbuild.yaml`, `service.py` |
+| **Agent Registry**<br>discovery, versioning, lifecycle | Six principals publish versioned cards to SQLite. Dispatch resolves the highest ACTIVE semantic version; ACTIVE / DEPRECATED / RETIRED transitions reroute traffic; capability lookup | `curl -H "Authorization: Bearer $TOKEN" $URL/fleet \| jq '.agents[].agent_id, .agents[].version'` |
+| **Agent Runtime**<br>long-running async execution | Thread-pool runtime, durable SQLite job state, live stage events, cooperative cancellation, restart reconciliation to INTERRUPTED | `curl -X POST -H "Authorization: Bearer $TOKEN" -d '{"crn":"03994971"}' $URL/jobs` returns **202 with a job id in under a second**, work continues server-side |
+| **Memory Bank**<br>secure cross-session context | Per-company audit history, tracked statutory fact sheet, operator notes, significance-scored deltas injected into every agent prompt | `curl -H "Authorization: Bearer $TOKEN" $URL/memory/03994971 \| jq '.prior_audits, .changes_since_last_audit'` |
+| **Agent Identity**<br>zero-trust access control | Each agent is a principal with its own scopes and short-lived HMAC-signed tokens, verified per call. Signing key from Secret Manager | `python -c "import agent_identity as a; a.mint_token('debate', audience='fleet-gateway', scopes=[a.SCOPE_STATUTORY_READ])"` → **IdentityError**: the Debate agent cannot obtain statutory scope |
+| **Agent Gateway**<br>unified routing and policy | One choke point: identity → registry lifecycle → published capability → scope → egress allowlist → per-agent quota → retry, with terminal errors failing fast. Allow *and* deny are audited | `python -c "import gateway, orchestrator; gateway.call('debate','collect_company_records', crn='03994971')"` → **PolicyViolation**, and the denial appears in `/audit` |
+| **Model Armor**<br>injection, poisoning, PII | Untrusted documents screened before any prompt: single-vector injection neutralised, multi-vector quarantined, credentials and PII redacted. Model output grounded — every citation string-matched to source, unverifiable HIGH claims demoted | `python orchestrator.py 03994971 --data-room sample_data_room_hostile --no-save` → **`Quarantined 1 document(s)`**, and the tampering is reported as a finding |
+| **Agent Observability**<br>OTel logs and reasoning traces | OTel span per agent stage exported to Cloud Trace, `agent.exchange` events carrying the full inter-agent reasoning chain, plus a hash-chained audit log | `curl -H "Authorization: Bearer $TOKEN" $URL/audit/verify` → `{"valid": true, ...}`; each job returns a `trace_id` resolvable in Cloud Trace |
+| **Gemini 3.5 or newer** | `gemini-3.5-flash` on Vertex AI with Pydantic-constrained structured output | `jq '.result.governance.model_tiers'` on any finished job |
+| **Additional Google models** | Gemma (`gemma-4-26b-a4b-it`) triages documents; `gemini-embedding-001` detects paraphrased risk clauses | same `model_tiers` block shows all three tiers |
+| **Google agent framework** | Google GenAI SDK drives every agent node | `orchestrator.py` |
+| **Google Cloud infrastructure** | Cloud Run, Vertex AI, Cloud Build, Artifact Registry, Secret Manager, Cloud Trace | the live service URL |
+| **Institutional data source** | UK Companies House statutory register and Document API — live production data, read-only | any run's `raw_statutory_data` carries seven endpoints |
+
+Everything above is covered by the 78-test suite, which needs no network:
+`python -m unittest discover -s tests -t .`
 
 ## 4. The financial data path
 
@@ -145,7 +154,59 @@ The credential is never replayed across the storage redirect: the 302 is followe
 the destination host is checked against an allowlist, and the signed URL is fetched without
 the API key attached.
 
-## 5. Trust boundaries
+## 5. Compliance, sovereignty, and the production-data posture
+
+The track asks how agents interact with production data without breaching compliance,
+data sovereignty, or security policy. This fleet does not use synthetic stand-ins: it
+reads the **live UK Companies House register**, the statutory system of record, plus the
+target company's own filed iXBRL accounts.
+
+### Data classification
+
+| Class | Source | Handling |
+| --- | --- | --- |
+| Public statutory data | Companies House API and Document API | Read-only; published under the Companies Act as a public register |
+| Personal data within it | Officer and PSC names, partial dates of birth, service addresses | Processed for KYB/AML diligence, the register's statutory purpose; displayed as filed, never enriched or cross-matched against private sources |
+| Confidential deal documents | Operator uploads | Screened by Model Armor, redacted for credentials and PII, held on the fleet's own disk, never sent to a third party |
+| Fleet state | Registry, memory, jobs, audit log | Local to the deployment; no external store |
+
+### Every external call is read-only
+
+The fleet cannot alter the register. Statutory access is exclusively HTTP `GET`
+(`mcp_server.py`), and the only outbound write in the entire system is the optional
+notification POST to an endpoint the operator configures. All mutations - job state,
+memory, audit records, uploads - are confined to the deployment's own storage.
+
+### Residency
+
+Cloud Run, Artifact Registry, Secret Manager, and all fleet state run in
+`europe-west1`, and `FLEET_DATA_REGION` records that in every trace and audit record.
+
+**One honest caveat:** model inference uses Vertex AI's `global` endpoint, because
+`europe-west1` does not serve `gemini-3.5-flash`. Inference is therefore not pinned to a
+single region, while all storage and statutory data remain in the EU. A deployment with a
+strict residency requirement should pin `GOOGLE_CLOUD_LOCATION` to an EU region and accept
+whichever model that region serves; the model id is configuration, not code. The code no
+longer carries a US default, so a misconfiguration cannot silently send data to `us-central1`.
+
+### Security controls, and what enforces them
+
+| Control | Enforced by |
+| --- | --- |
+| Least privilege per agent | Scoped identities; the Debate agent holds no statutory scope |
+| No unauthorised egress | Gateway allowlist; a tool declaring an unlisted host is refused |
+| Credential containment | The Companies House key is never replayed across the document storage redirect; secrets come from Secret Manager, never the image |
+| Untrusted input containment | Model Armor screens every uploaded document before any prompt |
+| Tamper evidence | Hash-chained audit log with `/audit/verify` |
+| Attribution | OpenTelemetry trace id on every record, finding, and exported report |
+| Human authority | The fleet recommends; it never approves. Every report names what a human must verify |
+
+### What this does not claim
+
+It is not a regulated compliance product, it holds no accreditation, and its output is
+diligence support rather than advice - a constraint Model Armor enforces on every report.
+
+## 6. Trust boundaries
 
 1. **Untrusted**: data room documents supplied by the seller. Screened by Model Armor
    before they reach any prompt; multi-vector injection is quarantined, not sanitized. A data
@@ -159,7 +220,7 @@ the API key attached.
 4. **Trusted**: Companies House API payloads and the fleet's own state, reached only through
    the gateway with a scoped token and an egress allowlist.
 
-## 6. Failure behaviour
+## 7. Failure behaviour
 
 | Failure | Behaviour |
 | --- | --- |

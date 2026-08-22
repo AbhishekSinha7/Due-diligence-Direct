@@ -276,6 +276,58 @@ def _run_job(job_id: str, crn: str, data_room_path: str, runner: Callable[..., A
             )
         finally:
             _CANCEL_FLAGS.pop(job_id, None)
+            _notify(job_id)
+
+
+_FLEET_READY = False
+
+
+def _ensure_fleet_registered() -> None:
+    """Publish cards and tools if this process has not done so.
+
+    The runtime can be driven without importing the orchestrator - a worker
+    process, a test, an embedding host - and dispatch is policy-checked, so the
+    registry and tool policies have to exist before the first notification.
+    """
+
+    global _FLEET_READY
+    if _FLEET_READY:
+        return
+    try:
+        import agent_registry
+        import gateway
+
+        gateway.bootstrap_tools()
+        agent_registry.bootstrap_registry()
+    except Exception:
+        pass
+    _FLEET_READY = True
+
+
+def _notify(job_id: str) -> None:
+    """Tell the outside world the job finished. Never let this fail the job."""
+
+    job = get_job(job_id)
+    if job is None:
+        return
+    _ensure_fleet_registered()
+    try:
+        import gateway
+
+        result = gateway.call("runtime", "notify.dispatch", job=job)
+        status = result.get("status") if isinstance(result, dict) else "unknown"
+    except Exception as exc:
+        status = f"failed:{exc.__class__.__name__}"
+
+    if status not in {"success", "disabled"}:
+        telemetry.audit(
+            "runtime.notify",
+            actor="runtime",
+            resource=f"job://{job_id}",
+            decision="error",
+            severity="WARN",
+            attributes={"status": status},
+        )
 
 
 def submit_job(

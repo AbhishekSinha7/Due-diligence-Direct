@@ -255,6 +255,15 @@ def bootstrap_tools() -> None:
     )
     register_tool(
         ToolPolicy(
+            name="search_companies",
+            required_scope=agent_identity.SCOPE_STATUTORY_READ,
+            handler=lambda query, limit=10: mcp_server.search_companies(query, limit),
+            egress_hosts=("api.company-information.service.gov.uk",),
+            description="Search the register by company name to resolve a company number.",
+        )
+    )
+    register_tool(
+        ToolPolicy(
             name="analyze_statutory_accounts",
             required_scope=agent_identity.SCOPE_STATUTORY_READ,
             handler=lambda crn, max_filings=2: mcp_server.analyze_statutory_accounts(
@@ -273,6 +282,36 @@ def bootstrap_tools() -> None:
             required_scope=agent_identity.SCOPE_DATA_ROOM_READ,
             handler=lambda path: data_room_loader.load_data_room(path),
             description="Extract text from local deal documents in the data room folder.",
+        )
+    )
+    import document_intelligence
+
+    register_tool(
+        ToolPolicy(
+            name="gemma.classify_documents",
+            required_scope=agent_identity.SCOPE_MODEL_INVOKE,
+            handler=lambda documents: document_intelligence.classify_documents(documents),
+            egress_hosts=("generativelanguage.googleapis.com",),
+            description="Triage data room documents with the open-weights Gemma model.",
+        )
+    )
+    register_tool(
+        ToolPolicy(
+            name="embedding.clause_scan",
+            required_scope=agent_identity.SCOPE_MODEL_INVOKE,
+            handler=lambda documents: document_intelligence.semantic_clause_scan(documents),
+            egress_hosts=("generativelanguage.googleapis.com",),
+            description="Detect risk clauses semantically with Gemini embeddings.",
+        )
+    )
+    import notifications
+
+    register_tool(
+        ToolPolicy(
+            name="notify.dispatch",
+            required_scope=agent_identity.SCOPE_NOTIFY,
+            handler=lambda job: notifications.dispatch(job),
+            description="Post a finished job summary to the configured notification webhook.",
         )
     )
     register_tool(

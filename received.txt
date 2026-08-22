@@ -1,0 +1,2 @@
+FAILED | ValueError: statutory source unavailable | None | risks=0
+SUCCEEDED | RED FLAG DEAL BREAKER | EXAMPLE TARGET LTD | risks=2

@@ -50,6 +50,8 @@ class FleetBackend(Protocol):
     def memory(self, crn: str) -> dict[str, Any]: ...
     def add_note(self, crn: str, note: str, author: str) -> dict[str, Any]: ...
     def upload_data_room(self, files: list[tuple[str, bytes]]) -> str: ...
+    def search_companies(self, query: str, limit: int) -> dict[str, Any]: ...
+    def report_pdf(self, job_id: str) -> bytes: ...
 
 
 class LocalBackend:
@@ -115,6 +117,17 @@ class LocalBackend:
 
     def add_note(self, crn: str, note: str, author: str = "dashboard") -> dict[str, Any]:
         return self._memory.add_note(crn, note, author=author)
+
+    def search_companies(self, query: str, limit: int = 10) -> dict[str, Any]:
+        return self._gateway.call("orchestrator", "search_companies", query=query, limit=limit)
+
+    def report_pdf(self, job_id: str) -> bytes:
+        import report_export
+
+        job = self._runtime.get_job(job_id) or {}
+        if not job.get("result"):
+            raise ValueError(f"Job {job_id} has no completed report to export.")
+        return report_export.build_pdf(job["result"])
 
     def upload_data_room(self, files: list[tuple[str, bytes]]) -> str:
         """Write uploads to a per-upload folder and return its path."""
@@ -235,6 +248,20 @@ class RemoteBackend:
 
     def add_note(self, crn: str, note: str, author: str = "dashboard") -> dict[str, Any]:
         return self._request("POST", f"/memory/{crn}/notes", json={"note": note, "author": author}) or {}
+
+    def search_companies(self, query: str, limit: int = 10) -> dict[str, Any]:
+        return self._request(
+            "GET", "/companies/search", params={"q": query, "limit": limit}
+        ) or {"status": "error", "results": []}
+
+    def report_pdf(self, job_id: str) -> bytes:
+        response = requests.get(
+            f"{self.base_url}/jobs/{job_id}/report.pdf",
+            headers=self._headers(),
+            timeout=REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        return response.content
 
     def upload_data_room(self, files: list[tuple[str, bytes]]) -> str:
         """Send documents to the control plane and get back its data room path."""

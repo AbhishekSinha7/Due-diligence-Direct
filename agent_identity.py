@@ -33,6 +33,7 @@ SCOPE_MODEL_INVOKE = "model.invoke"
 SCOPE_MEMORY_READ = "memory.read"
 SCOPE_MEMORY_WRITE = "memory.write"
 SCOPE_REGISTRY_WRITE = "registry.write"
+SCOPE_NOTIFY = "notification.send"
 
 
 class IdentityError(Exception):
@@ -67,10 +68,11 @@ FLEET_IDENTITIES: dict[str, AgentIdentity] = {
     "orchestrator": AgentIdentity(
         agent_id="orchestrator",
         display_name="Orchestrator Agent",
-        version="1.3.0",
+        version="1.5.0",
         scopes=(
             SCOPE_STATUTORY_READ,
             SCOPE_DATA_ROOM_READ,
+            SCOPE_MODEL_INVOKE,
             SCOPE_MEMORY_READ,
             SCOPE_MEMORY_WRITE,
             SCOPE_REGISTRY_WRITE,
@@ -93,6 +95,12 @@ FLEET_IDENTITIES: dict[str, AgentIdentity] = {
         display_name="Debate Agent",
         version="1.0.0",
         scopes=(SCOPE_MODEL_INVOKE,),
+    ),
+    "runtime": AgentIdentity(
+        agent_id="runtime",
+        display_name="Agent Runtime",
+        version="1.0.0",
+        scopes=(SCOPE_NOTIFY,),
     ),
     "synthesizer": AgentIdentity(
         agent_id="synthesizer",

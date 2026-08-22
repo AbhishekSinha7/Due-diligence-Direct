@@ -19,11 +19,35 @@ import mcp_server
 
 st.set_page_config(page_title="DueDiligence Direct - Fleet Console", layout="wide")
 
-DATA_ROOM_CHOICES = {
-    "Sample data room (clean)": "sample_data_room",
-    "Hostile data room (Model Armor demo)": "sample_data_room_hostile",
-    "Local data_room/": "data_room",
-}
+
+def _require_access_code() -> None:
+    """Gate the console when it is published publicly.
+
+    Cloud Run IAM is the right control for machine callers, but a browser cannot
+    present an identity token. When FLEET_CONSOLE_ACCESS_CODE is set the console
+    asks for it before rendering anything; unset, the console is open, which is
+    what you want on a laptop. This bounds who can spend model quota, and the
+    gateway's per-agent quota bounds how much any one session can spend.
+    """
+
+    expected = os.getenv("FLEET_CONSOLE_ACCESS_CODE", "").strip()
+    if not expected or st.session_state.get("access_granted"):
+        return
+
+    st.title("DueDiligence Direct")
+    st.caption("Governed multi-agent M&A diligence fleet. Enter the access code to continue.")
+    with st.form("access"):
+        supplied = st.text_input("Access code", type="password")
+        if st.form_submit_button("Enter", type="primary"):
+            if supplied == expected:
+                st.session_state["access_granted"] = True
+                st.rerun()
+            else:
+                st.error("That code is not recognised.")
+    st.stop()
+
+
+_require_access_code()
 
 SEVERITY_COLORS = {"HIGH": "#b91c1c", "MEDIUM": "#b45309", "LOW": "#2563eb", "CLEAR": "#15803d"}
 RECOMMENDATION_COLORS = {
@@ -38,13 +62,26 @@ TERMINAL_STATUSES = {"SUCCEEDED", "FAILED", "CANCELLED", "INTERRUPTED"}
 
 
 @st.cache_resource
-def get_backend(api_url: str):
-    """Connect to a control plane, or run the fleet locally when none is set."""
+def get_backend(api_url: str, fingerprint: float):
+    """Connect to a control plane, or run the fleet locally when none is set.
+
+    The backend is cached because building a local one publishes agent cards and
+    reconciles jobs, and the live panel reruns every two seconds. `fingerprint` is
+    the client module's mtime, so editing the client invalidates the cache instead
+    of leaving a stale object with missing methods behind.
+    """
 
     return fleet_client.get_backend(api_url)
 
 
-backend = get_backend(fleet_client.FLEET_API_URL)
+def _client_fingerprint() -> float:
+    try:
+        return os.path.getmtime(fleet_client.__file__)
+    except OSError:
+        return 0.0
+
+
+backend = get_backend(fleet_client.FLEET_API_URL, _client_fingerprint())
 
 
 def badge(text: str, color: str, size: int = 12) -> str:
@@ -119,6 +156,356 @@ def render_findings(items: list[dict], quote_key: str, title_key: str) -> None:
             st.caption(item.get(quote_key, ""))
             if item.get("evidence_note"):
                 st.caption(f"Grounding audit: {item['evidence_note']}")
+
+
+AGENT_AVATARS = {
+    "orchestrator": "🧭",
+    "legal_risk": "⚖️",
+    "financial_auditor": "📊",
+    "debate": "⚔️",
+    "synthesizer": "📝",
+    "memory_bank": "🧠",
+    "operator": "👤",
+}
+
+KIND_LABELS = {
+    "task_assignment": "assigns work to",
+    "finding_report": "reports to",
+    "challenge": "challenges",
+    "rebuttal": "rebuts to",
+    "resolution": "resolves for",
+    "context_recall": "recalls for",
+    "verdict": "delivers verdict to",
+}
+
+
+def render_conversation(entries: list[dict]) -> None:
+    """Render the inter-agent reasoning chain as a conversation."""
+
+    if not entries:
+        st.info(
+            "The agent conversation appears here: task assignments, findings, challenges, "
+            "rebuttals, and the final verdict."
+        )
+        return
+
+    for entry in entries:
+        sender = entry.get("sender", "unknown")
+        recipient = entry.get("recipient", "unknown")
+        kind = entry.get("kind", "message")
+        with st.chat_message(sender, avatar=AGENT_AVATARS.get(sender, "🤖")):
+            st.markdown(
+                f"**{sender}** {KIND_LABELS.get(kind, 'messages')} **{recipient}** "
+                f"{badge(kind.replace('_', ' '), '#475569', 11)}",
+                unsafe_allow_html=True,
+            )
+            st.write(entry.get("message", ""))
+            attributes = {
+                key: value
+                for key, value in (entry.get("attributes") or {}).items()
+                if value not in (None, "", [])
+            }
+            details = []
+            if attributes.get("model"):
+                details.append(f"model {attributes['model']}")
+            if attributes.get("latency_ms"):
+                details.append(f"{attributes['latency_ms']} ms")
+            if attributes.get("prompt_tokens") or attributes.get("output_tokens"):
+                details.append(
+                    f"{attributes.get('prompt_tokens', 0):,} in / "
+                    f"{attributes.get('output_tokens', 0):,} out tokens"
+                )
+            if attributes.get("findings") is not None:
+                details.append(f"{attributes['findings']} finding(s)")
+            if attributes.get("unverified_citations"):
+                details.append(f"{attributes['unverified_citations']} unverified citation(s)")
+            if details:
+                st.caption(" · ".join(details))
+
+
+STATUS_COLORS = {
+    "active": "#15803d",
+    "dissolved": "#475569",
+    "liquidation": "#b91c1c",
+    "administration": "#b45309",
+    "receivership": "#b45309",
+    "converted-closed": "#475569",
+}
+
+
+@st.dialog("Find a company", width="large")
+def company_search_dialog() -> None:
+    """Search the register by name and pick the company to audit."""
+
+    st.caption(
+        "Search UK Companies House by name. Selecting a result fills in its company "
+        "number, so you never need to know the number in advance."
+    )
+    query = st.text_input(
+        "Company name", value=st.session_state.get("last_search", ""), placeholder="e.g. Monzo Bank"
+    )
+    limit = st.slider("Results", min_value=5, max_value=30, value=10, step=5)
+
+    if st.button("Search", type="primary") and query.strip():
+        st.session_state["last_search"] = query
+        try:
+            st.session_state["search_results"] = backend.search_companies(query, limit)
+        except Exception as exc:
+            st.session_state["search_results"] = {"status": "error", "message": str(exc), "results": []}
+
+    results = st.session_state.get("search_results") or {}
+    if results.get("status") == "success":
+        found = results.get("results", [])
+        st.caption(
+            f"{results.get('total_results', len(found))} match(es) on the register; showing {len(found)}."
+        )
+        for item in found:
+            number = item.get("company_number", "")
+            with st.container(border=True):
+                left, right = st.columns([4, 1])
+                status = str(item.get("company_status", "unknown"))
+                left.markdown(
+                    f"**{item.get('title', 'Unknown')}** "
+                    f"{badge(status.upper(), STATUS_COLORS.get(status, '#475569'), 11)}",
+                    unsafe_allow_html=True,
+                )
+                left.caption(
+                    f"{number} · incorporated {item.get('date_of_creation', 'unknown')} · "
+                    f"{item.get('company_type', '')}"
+                )
+                left.caption(item.get("address_snippet", ""))
+                if right.button("Audit this", key=f"pick-{number}"):
+                    st.session_state["selected_crn"] = number
+                    st.session_state["selected_name"] = item.get("title", "")
+                    st.rerun()
+    elif results:
+        st.error(results.get("message") or f"Search failed ({results.get('status')}).")
+
+
+def _payload(bundle: dict, key: str) -> dict:
+    record = bundle.get(key, {}) or {}
+    data = record.get("data", {}) if isinstance(record, dict) else {}
+    return data if isinstance(data, dict) else {}
+
+
+def _address(address: dict | None) -> str:
+    if not isinstance(address, dict):
+        return ""
+    parts = [
+        address.get("premises"),
+        address.get("address_line_1"),
+        address.get("address_line_2"),
+        address.get("locality"),
+        address.get("region"),
+        address.get("postal_code"),
+        address.get("country"),
+    ]
+    return ", ".join(str(part) for part in parts if part)
+
+
+def render_company(bundle: dict) -> None:
+    """Everything the register holds: profile, officers, PSCs, charges, filings."""
+
+    if not bundle:
+        st.info("No statutory records were retrieved for this run.")
+        return
+
+    profile = _payload(bundle, "profile")
+    accounts = profile.get("accounts", {}) if isinstance(profile.get("accounts"), dict) else {}
+    confirmation = (
+        profile.get("confirmation_statement", {})
+        if isinstance(profile.get("confirmation_statement"), dict)
+        else {}
+    )
+
+    st.markdown(f"### {profile.get('company_name', 'Unknown company')}")
+    top = st.columns(4)
+    top[0].metric("Company number", profile.get("company_number", "-"))
+    top[1].metric("Status", str(profile.get("company_status", "unknown")).title())
+    top[2].metric("Incorporated", profile.get("date_of_creation", "-"))
+    top[3].metric("Type", str(profile.get("type", "-")).upper())
+
+    left, right = st.columns(2)
+    with left:
+        st.markdown("**Registered office**")
+        st.write(_address(profile.get("registered_office_address")) or "not recorded")
+        if profile.get("registered_office_is_in_dispute"):
+            st.warning("Registered office address is in dispute.")
+        st.markdown("**SIC codes**")
+        st.write(", ".join(profile.get("sic_codes", []) or []) or "not recorded")
+        st.markdown("**Jurisdiction**")
+        st.write(profile.get("jurisdiction", "-"))
+    with right:
+        st.markdown("**Accounts**")
+        st.write(
+            f"Next due: {accounts.get('next_due', '-')} · Overdue: {accounts.get('overdue', '-')} · "
+            f"Last made up to: {(accounts.get('last_accounts') or {}).get('made_up_to', '-')}"
+        )
+        st.markdown("**Confirmation statement**")
+        st.write(
+            f"Next due: {confirmation.get('next_due', '-')} · Overdue: {confirmation.get('overdue', '-')}"
+        )
+        st.markdown("**Register flags**")
+        st.write(
+            f"has_charges={profile.get('has_charges', False)} · "
+            f"has_insolvency_history={profile.get('has_insolvency_history', False)} · "
+            f"has_been_liquidated={profile.get('has_been_liquidated', False)}"
+        )
+
+    previous_names = profile.get("previous_company_names") or []
+    st.markdown("#### Previous company names")
+    if previous_names:
+        st.dataframe(
+            [
+                {
+                    "name": entry.get("name"),
+                    "effective_from": entry.get("effective_from"),
+                    "ceased_on": entry.get("ceased_on"),
+                }
+                for entry in previous_names
+            ],
+            hide_index=True,
+            width="stretch",
+        )
+    else:
+        st.caption("The company has never traded under a different registered name.")
+
+    officers = _payload(bundle, "officers")
+    officer_items = officers.get("items", []) or []
+    st.markdown(
+        f"#### Officers ({officers.get('active_count', 0)} active, "
+        f"{officers.get('resigned_count', 0)} resigned)"
+    )
+    if officer_items:
+        st.dataframe(
+            [
+                {
+                    "name": item.get("name"),
+                    "role": item.get("officer_role"),
+                    "status": "resigned" if item.get("resigned_on") else "active",
+                    "appointed_on": item.get("appointed_on"),
+                    "resigned_on": item.get("resigned_on", ""),
+                    "nationality": item.get("nationality", ""),
+                    "occupation": item.get("occupation", ""),
+                    "country_of_residence": item.get("country_of_residence", ""),
+                    "born": (
+                        f"{(item.get('date_of_birth') or {}).get('month', '')}/"
+                        f"{(item.get('date_of_birth') or {}).get('year', '')}"
+                        if item.get("date_of_birth")
+                        else ""
+                    ),
+                }
+                for item in officer_items
+                if isinstance(item, dict)
+            ],
+            hide_index=True,
+            width="stretch",
+        )
+    else:
+        st.caption(f"No officer records returned (endpoint status: {bundle.get('officers', {}).get('status')}).")
+
+    pscs = _payload(bundle, "pscs")
+    psc_items = pscs.get("items", []) or []
+    st.markdown(f"#### Persons with significant control ({len(psc_items)})")
+    if psc_items:
+        st.dataframe(
+            [
+                {
+                    "name": item.get("name"),
+                    "kind": item.get("kind"),
+                    "notified_on": item.get("notified_on"),
+                    "ceased_on": item.get("ceased_on", ""),
+                    "nature_of_control": "; ".join(item.get("natures_of_control", []) or []),
+                    "nationality": item.get("nationality", ""),
+                    "country_of_residence": item.get("country_of_residence", ""),
+                }
+                for item in psc_items
+                if isinstance(item, dict)
+            ],
+            hide_index=True,
+            width="stretch",
+        )
+    else:
+        st.caption(
+            f"No PSC records returned (endpoint status: {bundle.get('pscs', {}).get('status')}). "
+            "A company with no identified PSC is itself a KYB question."
+        )
+
+    charges = _payload(bundle, "charges")
+    charge_items = charges.get("items", []) or []
+    st.markdown(
+        f"#### Charges and mortgages ({charges.get('total_count', len(charge_items))} total, "
+        f"{charges.get('unfiltered_count', '')} unfiltered)".replace(", unfiltered", "")
+    )
+    if charge_items:
+        st.dataframe(
+            [
+                {
+                    "charge_code": item.get("charge_code") or item.get("id"),
+                    "status": item.get("status"),
+                    "created_on": item.get("created_on"),
+                    "delivered_on": item.get("delivered_on"),
+                    "satisfied_on": item.get("satisfied_on", ""),
+                    "classification": (item.get("classification") or {}).get("description", ""),
+                    "persons_entitled": "; ".join(
+                        entry.get("name", "") for entry in (item.get("persons_entitled") or [])
+                    ),
+                }
+                for item in charge_items
+                if isinstance(item, dict)
+            ],
+            hide_index=True,
+            width="stretch",
+        )
+    else:
+        st.caption("No registered charges, debentures, or mortgages.")
+
+    insolvency = _payload(bundle, "insolvency")
+    cases = insolvency.get("cases", []) or []
+    st.markdown(f"#### Insolvency ({len(cases)} case(s))")
+    if cases:
+        st.dataframe(
+            [
+                {
+                    "type": case.get("type"),
+                    "number": case.get("number", ""),
+                    "dates": "; ".join(
+                        f"{d.get('type')}={d.get('date')}" for d in (case.get("dates") or [])
+                    ),
+                    "practitioners": "; ".join(
+                        p.get("name", "") for p in (case.get("practitioners") or [])
+                    ),
+                }
+                for case in cases
+                if isinstance(case, dict)
+            ],
+            hide_index=True,
+            width="stretch",
+        )
+    else:
+        st.caption("No insolvency cases on the register.")
+
+    filings = _payload(bundle, "filings")
+    filing_items = filings.get("items", []) or []
+    st.markdown(f"#### Recent filings ({len(filing_items)})")
+    if filing_items:
+        st.dataframe(
+            [
+                {
+                    "date": item.get("date"),
+                    "type": item.get("type"),
+                    "category": item.get("category"),
+                    "description": item.get("description"),
+                }
+                for item in filing_items
+                if isinstance(item, dict)
+            ],
+            hide_index=True,
+            width="stretch",
+        )
+
+    with st.expander("Raw Companies House payload (every endpoint)"):
+        st.json(bundle)
 
 
 def render_accounts(accounts: dict) -> None:
@@ -240,10 +627,35 @@ def render_report(state: dict) -> None:
     governance = state.get("governance", {})
     counts = severity_counts(state)
 
-    st.markdown(
+    verdict_column, pdf_column, json_column = st.columns([3, 1, 1])
+    verdict_column.markdown(
         badge(report.get("recommendation", "UNKNOWN"), RECOMMENDATION_COLORS.get(report.get("recommendation", ""), "#475569"), 15),
         unsafe_allow_html=True,
     )
+
+    # Export lives beside the verdict: the report is the thing people came for.
+    try:
+        import report_export
+
+        pdf_column.download_button(
+            "⬇ PDF report",
+            data=report_export.build_pdf(state),
+            file_name=report_export.suggested_filename(state),
+            mime="application/pdf",
+            width="stretch",
+            type="primary",
+        )
+    except Exception as exc:
+        pdf_column.error(f"PDF unavailable: {exc}")
+
+    json_column.download_button(
+        "⬇ Full run (JSON)",
+        data=json.dumps(state, indent=2, default=str),
+        file_name=f"run-{state.get('crn', 'audit')}-{state.get('run_id', '')}.json",
+        mime="application/json",
+        width="stretch",
+    )
+
     st.subheader("Executive report")
     st.write(report.get("executive_summary", ""))
 
@@ -258,6 +670,8 @@ def render_report(state: dict) -> None:
     tabs = st.tabs(
         [
             "Report",
+            "Company",
+            "Agent conversation",
             "Filed accounts",
             "Governance",
             "Evidence",
@@ -281,9 +695,19 @@ def render_report(state: dict) -> None:
             st.code(state["artifact_path"])
 
     with tabs[1]:
-        render_accounts(state.get("accounts", {}))
+        render_company(state.get("raw_statutory_data", {}))
 
     with tabs[2]:
+        st.caption(
+            "Every message passed between agents during this run, in order. Each entry is also "
+            "an event on the OpenTelemetry span for this trace."
+        )
+        render_conversation(state.get("reasoning_chain", []))
+
+    with tabs[3]:
+        render_accounts(state.get("accounts", {}))
+
+    with tabs[4]:
         left, right = st.columns(2)
         left.markdown("**Execution identity and models**")
         left.json(
@@ -304,6 +728,36 @@ def render_report(state: dict) -> None:
                 "memory_written": governance.get("memory_written"),
             }
         )
+        usage = governance.get("token_usage") or {}
+        if usage:
+            st.markdown("**Model usage**")
+            usage_columns = st.columns(4)
+            usage_columns[0].metric("Model calls", usage.get("calls", 0))
+            usage_columns[1].metric("Prompt tokens", f"{usage.get('prompt_tokens', 0):,}")
+            usage_columns[2].metric("Output tokens", f"{usage.get('output_tokens', 0):,}")
+            usage_columns[3].metric("Total tokens", f"{usage.get('total_tokens', 0):,}")
+            by_call = usage.get("by_call") or []
+            if by_call:
+                st.dataframe(
+                    [
+                        {
+                            "call": call.get("schema"),
+                            "model": call.get("model"),
+                            "prompt_tokens": call.get("prompt_tokens"),
+                            "output_tokens": call.get("output_tokens"),
+                            "total_tokens": call.get("prompt_tokens", 0) + call.get("output_tokens", 0),
+                            "latency_ms": call.get("latency_ms"),
+                        }
+                        for call in by_call
+                    ],
+                    hide_index=True,
+                    width="stretch",
+                )
+                st.caption(
+                    f"Total model latency {usage.get('total_model_latency_ms', 0):,} ms across "
+                    f"{usage.get('calls', 0)} call(s)."
+                )
+
         armor_findings = state.get("data_room", {}).get("armor_findings", [])
         if armor_findings:
             st.markdown("**Model Armor input findings**")
@@ -331,7 +785,7 @@ def render_report(state: dict) -> None:
                 width="stretch",
             )
 
-    with tabs[3]:
+    with tabs[5]:
         rows = evidence_rows(state)
         if rows:
             st.dataframe(rows, hide_index=True, width="stretch")
@@ -340,19 +794,19 @@ def render_report(state: dict) -> None:
         with st.expander("Raw Companies House payload"):
             st.json(state.get("raw_statutory_data", {}))
 
-    with tabs[4]:
+    with tabs[6]:
         render_findings(state.get("legal_risks", {}).get("risks", []), "evidentiary_quote", "category")
         for limitation in state.get("legal_risks", {}).get("limitations", []):
             st.caption(f"Limitation: {limitation}")
 
-    with tabs[5]:
+    with tabs[7]:
         render_findings(
             state.get("financial_analysis", {}).get("findings", []), "evidentiary_quote", "category"
         )
         for limitation in state.get("financial_analysis", {}).get("limitations", []):
             st.caption(f"Limitation: {limitation}")
 
-    with tabs[6]:
+    with tabs[8]:
         st.write(state.get("debate_transcript", {}).get("risk_reward_summary", ""))
         for point in state.get("debate_transcript", {}).get("points", []):
             with st.container(border=True):
@@ -364,7 +818,7 @@ def render_report(state: dict) -> None:
                 st.caption(f"Legal: {point.get('legal_view', '')}")
                 st.caption(f"Financial: {point.get('financial_view', '')}")
 
-    with tabs[7]:
+    with tabs[9]:
         documents = state.get("data_room", {}).get("documents", [])
         if not documents:
             st.info(state.get("data_room", {}).get("message", "No data room documents were loaded."))
@@ -389,7 +843,7 @@ def render_report(state: dict) -> None:
                 if document.get("armor_redactions"):
                     st.caption(f"Redacted: {', '.join(document['armor_redactions'])}")
 
-    with tabs[8]:
+    with tabs[10]:
         memory = state.get("memory", {})
         if memory.get("is_first_audit"):
             st.info("This was the first audit of this company; a baseline has now been stored.")
@@ -429,13 +883,64 @@ def render_live_job(job_id: str) -> None:
     if job["status"] not in TERMINAL_STATUSES:
         if control.button("Cancel job", key=f"cancel-{job_id}"):
             backend.cancel_job(job_id)
-        st.progress(min(len(job["events"]) / 10, 0.95), text="Fleet working in the background")
+        st.progress(min(len(job["events"]) / 16, 0.95), text="Fleet working in the background")
 
-    for event in job["events"]:
-        st.write(f"`{event['timestamp']}` **{event['stage']}** - {event['message']}")
+    # Stage events say what the fleet is doing; exchanges say what the agents are
+    # saying to each other. Both stream live, so keep them side by side.
+    events = job["events"]
+    exchanges = [
+        {
+            "sender": (event.get("attributes") or {}).get("sender", "agent"),
+            "recipient": (event.get("attributes") or {}).get("recipient", "agent"),
+            "kind": (event.get("attributes") or {}).get("kind", "message"),
+            "message": event.get("message", ""),
+            "attributes": event.get("attributes") or {},
+        }
+        for event in events
+        if (event.get("attributes") or {}).get("exchange")
+    ]
+
+    stage_column, chat_column = st.columns([1, 1])
+    with stage_column:
+        st.markdown("**Pipeline stages**")
+        for event in events:
+            if (event.get("attributes") or {}).get("exchange"):
+                continue
+            st.write(f"`{event['timestamp'][11:19]}` **{event['stage']}** - {event['message']}")
+    with chat_column:
+        st.markdown("**Agent conversation**")
+        render_conversation(exchanges)
+
+    # Announce the transition once, the first time this client sees it finish.
+    seen = st.session_state.setdefault("announced_jobs", {})
+    if job["status"] in TERMINAL_STATUSES and seen.get(job_id) != job["status"]:
+        seen[job_id] = job["status"]
+        if job["status"] == "SUCCEEDED":
+            verdict = ((job.get("result") or {}).get("red_flag_verdict") or {}).get(
+                "recommendation", "complete"
+            )
+            st.toast(f"Audit finished for {job['crn']}: {verdict}", icon="✅")
+        elif job["status"] == "FAILED":
+            st.toast(f"Audit failed for {job['crn']}", icon="🚨")
+        else:
+            st.toast(f"Audit {job['status'].lower()} for {job['crn']}", icon="⚠️")
 
     if job["status"] == "SUCCEEDED" and job["result"]:
-        st.success("Audit complete")
+        report = (job["result"].get("red_flag_verdict") or {})
+        elapsed = ""
+        if job.get("started_at") and job.get("finished_at"):
+            try:
+                from datetime import datetime
+
+                delta = datetime.fromisoformat(job["finished_at"]) - datetime.fromisoformat(
+                    job["started_at"]
+                )
+                elapsed = f" in {delta.total_seconds():.0f}s"
+            except ValueError:
+                elapsed = ""
+        st.success(
+            f"Audit complete{elapsed} — verdict: {report.get('recommendation', 'unknown')}"
+        )
         render_report(job["result"])
     elif job["status"] == "FAILED":
         st.error(job["error"] or "Job failed")
@@ -453,17 +958,31 @@ st.caption(
 
 with st.sidebar:
     st.subheader("Run an audit")
-    crn = st.text_input("Company number", value="03994971", max_chars=8)
-    data_room_label = st.selectbox("Data room", list(DATA_ROOM_CHOICES))
+    if st.button("🔍 Search by company name", width="stretch"):
+        company_search_dialog()
+
+    crn = st.text_input(
+        "Company number",
+        value=st.session_state.get("selected_crn", "03994971"),
+        max_chars=8,
+        help="Type it directly, or use the search above if you only know the name.",
+    )
+    if st.session_state.get("selected_name"):
+        st.caption(f"Selected: {st.session_state['selected_name']}")
     uploaded_files = st.file_uploader(
-        "Or upload deal documents (contracts, side letters)",
+        "Deal documents (optional)",
         type=["csv", "md", "pdf", "txt"],
         accept_multiple_files=True,
         help=(
-            "Uploaded documents are sent to the fleet, screened by Model Armor, and used "
-            "instead of the selected data room. Financial figures always come from the "
-            "company's filed accounts, never from these files."
+            "Contracts, side letters, and other data room material. Uploads are sent to the "
+            "fleet and screened by Model Armor before any agent reads them. Statutory records "
+            "and filed accounts are always audited; financial figures never come from these "
+            "documents."
         ),
+    )
+    st.caption(
+        "No documents? The audit still runs on Companies House statutory records and the "
+        "company's filed accounts."
     )
     run_clicked = st.button("Submit to Agent Runtime", type="primary", width="stretch")
 
@@ -499,7 +1018,8 @@ if run_clicked:
         st.error(exc.errors()[0]["msg"])
         st.stop()
 
-    data_room_path = DATA_ROOM_CHOICES[data_room_label]
+    # No picker: either the operator uploads documents, or the audit is statutory-only.
+    data_room_path = ""
     if uploaded_files:
         try:
             data_room_path = backend.upload_data_room(

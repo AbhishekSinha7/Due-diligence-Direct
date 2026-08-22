@@ -19,6 +19,7 @@ import contextvars
 import json
 import os
 import sqlite3
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -133,6 +134,7 @@ class DueDiligenceState(TypedDict, total=False):
     debate_transcript: dict[str, Any]
     red_flag_verdict: dict[str, Any]
     governance: dict[str, Any]
+    reasoning_chain: list[dict[str, Any]]
     artifact_path: str
 
 
@@ -148,6 +150,8 @@ class RunContext:
     should_cancel: Callable[[], bool] | None = None
     models_used: list[str] = field(default_factory=list)
     model_errors: list[str] = field(default_factory=list)
+    transcript: list[dict[str, Any]] = field(default_factory=list)
+    model_calls: list[dict[str, Any]] = field(default_factory=list)
 
     def emit(self, stage: str, message: str, **attributes: Any) -> None:
         print(f"[{stage}] {message}")
@@ -156,6 +160,58 @@ class RunContext:
                 self.progress(stage, message, **attributes)
             except Exception:
                 pass
+
+    def exchange(
+        self,
+        *,
+        sender: str,
+        recipient: str,
+        kind: str,
+        message: str,
+        **attributes: Any,
+    ) -> dict[str, Any]:
+        """Record one inter-agent message on the reasoning chain.
+
+        The entry lands in three places: the run state (so the report can replay
+        the conversation), the OpenTelemetry span (so a trace shows the handoffs),
+        and the job event stream (so a client can watch it happen live).
+        """
+
+        ids = telemetry.record_event(
+            "agent.exchange",
+            sender=sender,
+            recipient=recipient,
+            kind=kind,
+            message=message[:400],
+            **attributes,
+        )
+        entry = {
+            "seq": len(self.transcript) + 1,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "sender": sender,
+            "recipient": recipient,
+            "kind": kind,
+            "message": message,
+            "attributes": attributes,
+            "trace_id": ids["trace_id"],
+            "span_id": ids["span_id"],
+        }
+        self.transcript.append(entry)
+
+        if self.progress is not None:
+            try:
+                self.progress(
+                    "Agent exchange",
+                    message,
+                    exchange=True,
+                    sender=sender,
+                    recipient=recipient,
+                    kind=kind,
+                    **attributes,
+                )
+            except Exception:
+                pass
+        return entry
 
     def checkpoint_cancel(self, stage: str) -> None:
         if self.should_cancel is not None and self.should_cancel():
@@ -189,7 +245,9 @@ def _client() -> genai.Client | None:
             return genai.Client(
                 vertexai=True,
                 project=os.getenv("GOOGLE_CLOUD_PROJECT"),
-                location=os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1"),
+                # Never default to a US region: this fleet processes UK statutory
+                # records and the residency posture is part of the product.
+                location=os.getenv("GOOGLE_CLOUD_LOCATION", "global"),
             )
         except Exception:
             return None
@@ -226,6 +284,7 @@ def _invoke_model(schema_name: str, prompt: str, response_schema: type[BaseModel
     last_error: Exception | None = None
     for model in MODEL_CANDIDATES:
         try:
+            started = time.monotonic()
             response = client.models.generate_content(
                 model=model,
                 contents=prompt,
@@ -237,7 +296,27 @@ def _invoke_model(schema_name: str, prompt: str, response_schema: type[BaseModel
             )
             payload = json.loads(response.text)
             context.models_used.append(model)
-            return {"status": "success", "model": model, "schema": schema_name, "data": payload}
+            usage = getattr(response, "usage_metadata", None)
+            prompt_tokens = getattr(usage, "prompt_token_count", None)
+            output_tokens = getattr(usage, "candidates_token_count", None)
+            context.model_calls.append(
+                {
+                    "schema": schema_name,
+                    "model": model,
+                    "prompt_tokens": prompt_tokens or 0,
+                    "output_tokens": output_tokens or 0,
+                    "latency_ms": int((time.monotonic() - started) * 1000),
+                }
+            )
+            return {
+                "status": "success",
+                "model": model,
+                "schema": schema_name,
+                "data": payload,
+                "latency_ms": int((time.monotonic() - started) * 1000),
+                "prompt_tokens": prompt_tokens,
+                "output_tokens": output_tokens,
+            }
         except Exception as exc:
             last_error = exc
             context.model_errors.append(f"{model}: {classify_model_error(exc)}")
@@ -281,6 +360,9 @@ def _generate_structured(
         )
         payload = dict(result["data"])
         payload["model_used"] = result["model"]
+        payload["model_latency_ms"] = result.get("latency_ms")
+        payload["prompt_tokens"] = result.get("prompt_tokens")
+        payload["output_tokens"] = result.get("output_tokens")
         return payload
     except gateway.PolicyViolation as exc:
         reason = f"Gateway denied the model call: {exc}"
@@ -501,15 +583,18 @@ def _accounts_findings(accounts: dict[str, Any]) -> list[dict[str, str]]:
 # Clause patterns that matter in an acquisition, with the severity a deal team
 # would attach to them. Used when no model is available, so an uploaded contract
 # is never silently ignored.
+# Severity here means "how much deal-team attention", not "how fatal". A contract
+# clause is a condition to negotiate; only statutory distress (insolvency, an
+# insolvent balance sheet) is a hard stop, so no clause is graded HIGH.
 CLAUSE_PATTERNS: tuple[tuple[str, str, str], ...] = (
-    ("change of control", "HIGH", "Change of Control"),
-    ("uncapped indemnit", "HIGH", "Uncapped Indemnity"),
-    ("unlimited liabilit", "HIGH", "Unlimited Liability"),
+    ("change of control", "MEDIUM", "Change of Control"),
+    ("uncapped indemnit", "MEDIUM", "Uncapped Indemnity"),
+    ("unlimited liabilit", "MEDIUM", "Unlimited Liability"),
     ("termination for convenience", "MEDIUM", "Termination for Convenience"),
-    ("without prior written consent", "MEDIUM", "Assignment Restriction"),
-    ("exclusivit", "MEDIUM", "Exclusivity"),
-    ("non-compete", "MEDIUM", "Non-Compete"),
-    ("liquidated damages", "MEDIUM", "Liquidated Damages"),
+    ("without prior written consent", "LOW", "Assignment Restriction"),
+    ("exclusivit", "LOW", "Exclusivity"),
+    ("non-compete", "LOW", "Non-Compete"),
+    ("liquidated damages", "LOW", "Liquidated Damages"),
     ("automatically renew", "LOW", "Auto-Renewal"),
     ("governing law", "LOW", "Governing Law"),
 )
@@ -527,11 +612,29 @@ def _clause_excerpt(text: str, needle: str, width: int = 160) -> str:
     return " ".join(text[start:end].split())
 
 
-def _data_room_findings(data_room: dict[str, Any], limit: int = 6) -> list[dict[str, str]]:
-    """Deterministic contract review, so uploads still surface without a model."""
+def _data_room_findings(data_room: dict[str, Any], limit: int = 8) -> list[dict[str, str]]:
+    """Contract review from literal matches plus semantic (embedding) matches."""
 
     findings: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
+
+    severity_by_label = {label: severity for _, severity, label in CLAUSE_PATTERNS}
+    for match in (data_room.get("semantic_clauses") or {}).get("matches", []):
+        key = (match.get("file_name", ""), match.get("clause", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        findings.append(
+            {
+                "category": f"Contract Term: {match['clause']}",
+                "severity": severity_by_label.get(match["clause"], "MEDIUM"),
+                "finding": (
+                    f"{match['clause']} identified in {match['file_name']} by semantic match "
+                    f"(similarity {match['similarity']})."
+                ),
+                "evidentiary_quote": f"{match['file_name']}: \"{match['excerpt']}\"",
+            }
+        )
 
     for document in data_room.get("documents", []):
         if document.get("quarantined"):
@@ -565,6 +668,90 @@ def _data_room_findings(data_room: dict[str, Any], limit: int = 6) -> list[dict[
             )
 
     return findings[:limit]
+
+
+def _governance_findings(bundle: dict[str, Any]) -> list[dict[str, str]]:
+    """Board and corporate-history signals from the officers and profile records."""
+
+    findings: list[dict[str, str]] = []
+    officers = _success_data(bundle, "officers")
+    profile = _success_data(bundle, "profile")
+
+    if _status(bundle, "officers") in {"success"}:
+        active = int(officers.get("active_count", 0) or 0)
+        resigned = int(officers.get("resigned_count", 0) or 0)
+        items = officers.get("items", [])
+        items = items if isinstance(items, list) else []
+        directors = [
+            item.get("name", "unknown")
+            for item in items
+            if isinstance(item, dict)
+            and item.get("officer_role", "").startswith("director")
+            and not item.get("resigned_on")
+        ]
+
+        if active == 0:
+            severity = "HIGH"
+            finding = "No active officers are appointed; the company has no one able to bind it."
+        elif active == 1:
+            severity = "MEDIUM"
+            finding = (
+                f"Sole active officer ({directors[0] if directors else 'unnamed'}); key-person "
+                "dependency and no board oversight."
+            )
+        else:
+            severity = "LOW"
+            finding = f"{active} active officer(s) appointed."
+
+        findings.append(
+            {
+                "category": "Board Composition",
+                "severity": severity,
+                "finding": f"{finding} {resigned} historical resignation(s).",
+                "evidentiary_quote": f"officers.active_count={active}; officers.resigned_count={resigned}",
+            }
+        )
+
+    previous_names = profile.get("previous_company_names")
+    if isinstance(previous_names, list) and previous_names:
+        names = "; ".join(
+            f"{entry.get('name')} ({entry.get('effective_from')} to {entry.get('ceased_on')})"
+            for entry in previous_names[:3]
+            if isinstance(entry, dict)
+        )
+        findings.append(
+            {
+                "category": "Corporate History",
+                "severity": "MEDIUM",
+                "finding": (
+                    f"The company has traded under {len(previous_names)} previous name(s). "
+                    "Verify contracts, licences, and liabilities follow the current entity."
+                ),
+                "evidentiary_quote": f"profile.previous_company_names: {names}",
+            }
+        )
+
+    if profile.get("has_insolvency_history"):
+        findings.append(
+            {
+                "category": "Insolvency History",
+                "severity": "MEDIUM",
+                "finding": "The register records prior insolvency history for this entity.",
+                "evidentiary_quote": "profile.has_insolvency_history=True",
+            }
+        )
+
+    if profile.get("registered_office_is_in_dispute"):
+        findings.append(
+            {
+                "category": "Registered Office",
+                "severity": "MEDIUM",
+                "finding": "The registered office address is recorded as in dispute.",
+                "evidentiary_quote": "profile.registered_office_is_in_dispute=True",
+            }
+        )
+
+    return findings
 
 
 def _memory_risk_items(memory: dict[str, Any]) -> list[dict[str, str]]:
@@ -644,6 +831,7 @@ def _fallback_legal(
         }
     )
 
+    risks.extend(_governance_findings(bundle))
     risks.extend(_data_room_findings(data_room or {}))
     risks.extend(_memory_risk_items(memory or {}))
 
@@ -801,6 +989,47 @@ def data_ingestion_node(state: DueDiligenceState) -> DueDiligenceState:
                     f"accounts:{filing.get('filing_date', 'unknown')}: {filing.get('status')}"
                 )
 
+        facts_line = (
+            f"status={facts.get('company_status')}, charges={facts.get('charge_count')}, "
+            f"insolvency_cases={facts.get('insolvency_cases')}, net_assets={facts.get('net_assets')}"
+        )
+        context.exchange(
+            sender="orchestrator",
+            recipient="legal_risk",
+            kind="task_assignment",
+            message=(
+                f"Audit {crn}. Statutory record collected ({facts_line}). "
+                "Assess insolvency, charges, beneficial ownership, and contract liabilities."
+            ),
+            charge_count=facts.get("charge_count"),
+            insolvency_cases=facts.get("insolvency_cases"),
+        )
+        context.exchange(
+            sender="orchestrator",
+            recipient="financial_auditor",
+            kind="task_assignment",
+            message=(
+                f"Audit {crn}. Filed accounts parsed deterministically "
+                f"({accounts.get('filings_examined', 0)} filing(s) examined). "
+                "Interpret the computed balance sheet metrics; do not recompute them."
+            ),
+            filings_examined=accounts.get("filings_examined", 0),
+        )
+        if changes:
+            context.exchange(
+                sender="memory_bank",
+                recipient="orchestrator",
+                kind="context_recall",
+                message=(
+                    f"{len(changes)} tracked fact(s) changed since the last audit: "
+                    + "; ".join(
+                        f"{c['fact']} {c['previous']} -> {c['current']} [{c['significance']}]"
+                        for c in changes[:4]
+                    )
+                ),
+                changes=len(changes),
+            )
+
         return {
             "crn": crn,
             "raw_statutory_data": bundle,
@@ -813,7 +1042,19 @@ def data_ingestion_node(state: DueDiligenceState) -> DueDiligenceState:
 def data_room_ingestion_node(state: DueDiligenceState) -> DueDiligenceState:
     context = _context()
     context.checkpoint_cancel("Ingest_Data_Room")
-    path = state.get("data_room_path", "data_room")
+    path = (state.get("data_room_path") or "").strip()
+
+    if not path:
+        # Documents are optional: the statutory record and filed accounts stand alone.
+        context.emit("Data room", "No deal documents supplied; auditing statutory records only")
+        return {
+            "data_room": {
+                "status": "not_provided",
+                "documents": [],
+                "errors": [],
+                "message": "No deal documents were supplied; the audit is statutory-only.",
+            }
+        }
 
     with telemetry.agent_span("agent.orchestrator.ingest_data_room", agent_id="orchestrator", path=path):
         context.emit("Data room", f"Extracting deal documents from {path}")
@@ -830,6 +1071,53 @@ def data_room_ingestion_node(state: DueDiligenceState) -> DueDiligenceState:
                 f"Quarantined {blocked} document(s) that attempted to steer the audit",
                 blocked=blocked,
             )
+
+        # Tier the models: an open model triages, embeddings find paraphrased clauses,
+        # and Gemini 3.5 is reserved for the reasoning that follows.
+        readable = [
+            {"file_name": doc.get("file_name"), "text_excerpt": doc.get("text_excerpt", "")}
+            for doc in screened.get("documents", [])
+            if not doc.get("quarantined")
+        ]
+        triage: dict[str, Any] = {"status": "skipped", "classifications": []}
+        clauses: dict[str, Any] = {"status": "skipped", "matches": []}
+        if readable:
+            try:
+                triage = gateway.call("orchestrator", "gemma.classify_documents", documents=readable)
+                by_name = {
+                    item["file_name"]: item for item in triage.get("classifications", [])
+                }
+                for document in screened.get("documents", []):
+                    match = by_name.get(document.get("file_name"))
+                    if match:
+                        document["classification"] = match["classification"]
+                        document["classification_rationale"] = match.get("rationale", "")
+                        document["classified_by"] = triage.get("model")
+            except gateway.PolicyViolation as exc:
+                triage = {"status": "policy_denied", "message": str(exc), "classifications": []}
+
+            try:
+                clauses = gateway.call("orchestrator", "embedding.clause_scan", documents=readable)
+            except gateway.PolicyViolation as exc:
+                clauses = {"status": "policy_denied", "message": str(exc), "matches": []}
+
+            if triage.get("classifications") or clauses.get("matches"):
+                context.emit(
+                    "Document intelligence",
+                    f"{triage.get('model') or 'heuristic'} triaged {len(triage.get('classifications', []))} "
+                    f"document(s); {len(clauses.get('matches', []))} clause(s) matched semantically",
+                    triage_model=triage.get("model"),
+                    clause_matches=len(clauses.get("matches", [])),
+                )
+
+        # Record every tier that actually answered, so the governance block reflects
+        # the whole model stack rather than only the reasoning model.
+        for tier_result in (triage, clauses):
+            if tier_result.get("status") == "success" and tier_result.get("model"):
+                context.models_used.append(tier_result["model"])
+
+        screened["triage"] = triage
+        screened["semantic_clauses"] = clauses
 
         errors = [
             *state.get("ingestion_errors", []),
@@ -883,6 +1171,8 @@ And these screened data room documents:
 {json.dumps(_armored_documents(state.get("data_room", {})), indent=2, default=str)[:12000]}
 
 Rules:
+- Cover insolvency, charges, beneficial ownership (PSC), board composition from the officers
+  record, previous company names, and any contract liabilities in the documents.
 - Do not invent liabilities.
 - Quote exact endpoint names, identifiers, counts, or statuses as evidence. Citations are
   verified against the source payload by a deterministic audit, and unverifiable citations
@@ -911,6 +1201,26 @@ Rules:
             f"{len(report['risks'])} legal finding(s); {unverified} citation(s) failed the grounding audit",
             findings=len(report["risks"]),
             unverified=unverified,
+        )
+        headline = [
+            f"{risk.get('severity')} {risk.get('category')}"
+            for risk in report.get("risks", [])
+            if risk.get("severity") in {"HIGH", "MEDIUM"}
+        ]
+        context.exchange(
+            sender="legal_risk",
+            recipient="debate",
+            kind="finding_report",
+            message=(
+                f"Legal position: {report.get('overall_legal_status', 'unstated')}. "
+                + (f"Escalating: {'; '.join(headline[:4])}." if headline else "No material liabilities found.")
+            ),
+            findings=len(report.get("risks", [])),
+            unverified_citations=unverified,
+            model=report.get("model_used"),
+            latency_ms=report.get("model_latency_ms"),
+            prompt_tokens=report.get("prompt_tokens"),
+            output_tokens=report.get("output_tokens"),
         )
         return {"legal_risks": report}
 
@@ -984,6 +1294,26 @@ Rules:
             f"{len(report['findings'])} financial finding(s) produced",
             findings=len(report["findings"]),
         )
+        headline = [
+            f"{item.get('severity')} {item.get('category')}"
+            for item in report.get("findings", [])
+            if item.get("severity") in {"HIGH", "MEDIUM"}
+        ]
+        context.exchange(
+            sender="financial_auditor",
+            recipient="debate",
+            kind="finding_report",
+            message=(
+                f"Financial position: {report.get('overall_financial_status', 'unstated')}. "
+                + (f"Escalating: {'; '.join(headline[:4])}." if headline else "No material financial concern found.")
+            ),
+            findings=len(report.get("findings", [])),
+            accounts_status=report.get("accounts_status"),
+            model=report.get("model_used"),
+            latency_ms=report.get("model_latency_ms"),
+            prompt_tokens=report.get("prompt_tokens"),
+            output_tokens=report.get("output_tokens"),
+        )
         return {"financial_analysis": report}
 
 
@@ -1023,6 +1353,30 @@ Return JSON matching the requested schema.
             f"{len(report.get('points', []))} contested issue(s) resolved",
             points=len(report.get("points", [])),
         )
+        for point in report.get("points", []):
+            issue = point.get("issue", "Unnamed issue")
+            context.exchange(
+                sender="legal_risk",
+                recipient="financial_auditor",
+                kind="challenge",
+                message=f"On '{issue}': {point.get('legal_view', 'no legal view stated')}",
+                issue=issue,
+            )
+            context.exchange(
+                sender="financial_auditor",
+                recipient="legal_risk",
+                kind="rebuttal",
+                message=f"On '{issue}': {point.get('financial_view', 'no financial view stated')}",
+                issue=issue,
+            )
+            context.exchange(
+                sender="debate",
+                recipient="synthesizer",
+                kind="resolution",
+                message=f"Resolved '{issue}' at {point.get('severity', 'UNKNOWN')}: {point.get('resolved_position', '')}",
+                issue=issue,
+                severity=point.get("severity"),
+            )
         return {"debate_transcript": report}
 
 
@@ -1100,6 +1454,20 @@ Return JSON matching the requested schema.
             f"Verdict: {report['recommendation']}",
             recommendation=report["recommendation"],
         )
+        context.exchange(
+            sender="synthesizer",
+            recipient="operator",
+            kind="verdict",
+            message=(
+                f"{report['recommendation']}: {report.get('executive_summary', '')[:300]}"
+            ),
+            recommendation=report["recommendation"],
+            high=counts["HIGH"],
+            medium=counts["MEDIUM"],
+            model=report.get("model_used"),
+            prompt_tokens=report.get("prompt_tokens"),
+            output_tokens=report.get("output_tokens"),
+        )
 
         # Attribute each agent's output to the model that actually produced it, so a
         # partial outage cannot be read as a clean model-generated report.
@@ -1113,8 +1481,31 @@ Return JSON matching the requested schema.
             agent for agent, model in agent_models.items() if model == "deterministic-fallback"
         )
 
+        token_usage = {
+            "calls": len(context.model_calls),
+            "prompt_tokens": sum(call["prompt_tokens"] for call in context.model_calls),
+            "output_tokens": sum(call["output_tokens"] for call in context.model_calls),
+            "total_tokens": sum(
+                call["prompt_tokens"] + call["output_tokens"] for call in context.model_calls
+            ),
+            "by_call": list(context.model_calls),
+            "total_model_latency_ms": sum(call["latency_ms"] for call in context.model_calls),
+        }
+
+        data_room_state = state.get("data_room", {})
+        model_tiers = {
+            "reasoning": sorted(
+                {m for m in context.models_used if "embedding" not in m and "gemma" not in m}
+            )
+            or ["deterministic-fallback"],
+            "document_triage": (data_room_state.get("triage") or {}).get("model"),
+            "clause_detection": (data_room_state.get("semantic_clauses") or {}).get("model"),
+        }
+
         governance = {
             "trace_id": ids["trace_id"],
+            "token_usage": token_usage,
+            "model_tiers": model_tiers,
             "models_used": sorted(set(context.models_used)) or ["deterministic-fallback"],
             "agent_models": agent_models,
             "agents_on_deterministic_fallback": fell_back,
@@ -1146,6 +1537,7 @@ Return JSON matching the requested schema.
             "ingestion_errors": errors,
             "trace_id": ids["trace_id"],
             "governance": governance,
+            "reasoning_chain": list(context.transcript),
         }
 
 
@@ -1301,6 +1693,12 @@ def _print_report(final_state: DueDiligenceState) -> None:
     print(f"- trace_id: {governance.get('trace_id', 'n/a')}")
     print(f"- analysis mode: {governance.get('analysis_mode', 'unknown')}")
     print(f"- models: {', '.join(governance.get('models_used', []))}")
+    tiers = governance.get("model_tiers") or {}
+    if tiers.get("document_triage") or tiers.get("clause_detection"):
+        print(
+            f"- model tiers: reasoning={', '.join(tiers.get('reasoning', []))}; "
+            f"triage={tiers.get('document_triage')}; clauses={tiers.get('clause_detection')}"
+        )
     if governance.get("agents_on_deterministic_fallback"):
         print(
             f"- agents on deterministic fallback: {', '.join(governance['agents_on_deterministic_fallback'])}"

@@ -1,6 +1,6 @@
 import os
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
 
 import requests
 from dotenv import load_dotenv
@@ -102,6 +102,43 @@ def _make_request(endpoint: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def search_companies(query: str, limit: int = 10) -> dict[str, Any]:
+    """Find companies by name when the operator does not know the company number."""
+
+    term = " ".join(str(query or "").split())
+    if len(term) < 2:
+        return {"status": "invalid_query", "message": "Enter at least two characters.", "results": []}
+
+    limit = max(1, min(int(limit or 10), 50))
+    response = _make_request(f"/search/companies?q={quote_plus(term)}&items_per_page={limit}")
+    if response["status"] != "success":
+        return {**response, "results": []}
+
+    data = response.get("data", {})
+    results = []
+    for item in data.get("items", []):
+        if not isinstance(item, dict):
+            continue
+        results.append(
+            {
+                "company_number": item.get("company_number"),
+                "title": item.get("title"),
+                "company_status": item.get("company_status"),
+                "company_type": item.get("company_type"),
+                "date_of_creation": item.get("date_of_creation"),
+                "address_snippet": item.get("address_snippet"),
+            }
+        )
+
+    return {
+        "status": "success",
+        "query": term,
+        "total_results": data.get("total_results", len(results)),
+        "results": results,
+    }
+
+
+@mcp.tool()
 def get_company_overview(input_data: CompanyQuery) -> dict[str, Any]:
     """Fetch general profile, incorporation date, status, and SIC codes."""
     return _make_request(f"/company/{input_data.crn}")
@@ -123,6 +160,20 @@ def get_company_charges(input_data: CompanyQuery) -> dict[str, Any]:
 def get_significant_controllers(input_data: CompanyQuery) -> dict[str, Any]:
     """Fetch Persons with Significant Control and ultimate beneficial owners."""
     return _make_request(f"/company/{input_data.crn}/persons-with-significant-control")
+
+
+@mcp.tool()
+def get_officers(input_data: CompanyQuery) -> dict[str, Any]:
+    """Fetch current and resigned directors, secretaries, and their appointments."""
+
+    return _make_request(f"/company/{input_data.crn}/officers?items_per_page=50")
+
+
+@mcp.tool()
+def get_registers(input_data: CompanyQuery) -> dict[str, Any]:
+    """Fetch which statutory registers the company holds at Companies House."""
+
+    return _make_request(f"/company/{input_data.crn}/registers")
 
 
 @mcp.tool()
@@ -329,6 +380,8 @@ def collect_company_records(input_data: CompanyQuery) -> dict[str, Any]:
         "charges": get_company_charges(input_data),
         "filings": get_filing_history(input_data),
         "pscs": get_significant_controllers(input_data),
+        "officers": get_officers(input_data),
+        "registers": get_registers(input_data),
     }
 
 

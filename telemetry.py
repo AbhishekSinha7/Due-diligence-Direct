@@ -169,6 +169,28 @@ def agent_span(name: str, **attributes: Any) -> Iterator[dict[str, str]]:
             raise
 
 
+def record_event(name: str, **attributes: Any) -> dict[str, str]:
+    """Attach an event to the active span, so a trace carries the reasoning chain.
+
+    Spans say which agent ran; events say what it concluded and who it handed to.
+    Both are needed for an end-to-end reasoning trace.
+    """
+
+    trace_id, span_id = current_ids()
+    try:
+        from opentelemetry import trace
+
+        span = trace.get_current_span()
+        if span is not None and span.get_span_context().is_valid:
+            span.add_event(
+                name,
+                attributes={f"fleet.{k}": ("" if v is None else str(v)) for k, v in attributes.items()},
+            )
+    except Exception:
+        pass
+    return {"trace_id": trace_id, "span_id": span_id}
+
+
 def _chain_hash(previous: str, payload: dict[str, Any]) -> str:
     body = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(f"{previous}{body}".encode("utf-8")).hexdigest()

@@ -269,18 +269,28 @@ def find_by_capability(capability: str) -> list[dict[str, Any]]:
 FLEET_CARDS: list[dict[str, Any]] = [
     {
         "agent_id": "orchestrator",
-        "version": "1.3.0",
-        "description": "Plans the diligence run, ingests statutory records, filed accounts, and data room evidence, then fans work out to specialist agents.",
+        "version": "1.5.0",
+        "description": "Resolves a company by name or number, plans the diligence run, ingests statutory records, filed accounts, and data room evidence, triages documents with an open model, then fans work out to specialist agents.",
         "capabilities": [
+            "company_search",
             "planning",
             "statutory_ingestion",
             "accounts_ingestion",
             "data_room_ingestion",
+            "document_triage",
+            "semantic_clause_detection",
             "fan_out",
         ],
         "input_schema": "DueDiligenceRequest",
         "output_schema": "DueDiligenceState",
-        "tools": ["collect_company_records", "analyze_statutory_accounts", "load_data_room"],
+        "tools": [
+            "search_companies",
+            "collect_company_records",
+            "analyze_statutory_accounts",
+            "load_data_room",
+            "gemma.classify_documents",
+            "embedding.clause_scan",
+        ],
     },
     {
         "agent_id": "legal_risk",
@@ -308,6 +318,15 @@ FLEET_CARDS: list[dict[str, Any]] = [
         "input_schema": "LegalAuditReport+FinancialAuditReport",
         "output_schema": "DebateReport",
         "tools": ["gemini.generate_structured"],
+    },
+    {
+        "agent_id": "runtime",
+        "version": "1.0.0",
+        "description": "Executes diligence jobs asynchronously and notifies external systems when one reaches a terminal state.",
+        "capabilities": ["async_execution", "notification_dispatch"],
+        "input_schema": "DueDiligenceRequest",
+        "output_schema": "JobRecord",
+        "tools": ["notify.dispatch"],
     },
     {
         "agent_id": "synthesizer",

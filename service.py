@@ -36,7 +36,7 @@ from typing import Any
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 import agent_identity
@@ -98,10 +98,12 @@ async def index(request: Request) -> JSONResponse:
                 "GET /healthz": "liveness probe",
                 "GET /readyz": "readiness and dependency status",
                 "GET /fleet": "agent cards, identities, tool policies, runtime stats",
+                "GET /companies/search?q=": "find a company by name -> company numbers",
                 "POST /data-rooms": "upload deal documents -> data_room_path",
                 "POST /jobs": "submit an audit: {\"crn\": \"03994971\"} -> job id",
                 "GET /jobs": "recent jobs",
                 "GET /jobs/{job_id}": "status, stage events, final report",
+                "GET /jobs/{job_id}/report.pdf": "download the Red Flag Report as a PDF",
                 "POST /jobs/{job_id}/cancel": "cooperative cancellation",
                 "GET /memory/{crn}": "prior audits, notes, tracked-fact deltas",
                 "POST /memory/{crn}/notes": "add an operator note",
@@ -132,6 +134,21 @@ async def readyz(request: Request) -> JSONResponse:
             "runtime": runtime.fleet_stats(),
         }
     )
+
+
+async def search_companies(request: Request) -> JSONResponse:
+    """Resolve a company by name. Routed through the gateway like any other tool."""
+
+    if (denied := _guard(request)) is not None:
+        return denied
+    query = request.query_params.get("q", "")
+    limit = int(request.query_params.get("limit", "10"))
+    try:
+        return JSONResponse(
+            gateway.call("orchestrator", "search_companies", query=query, limit=limit)
+        )
+    except gateway.PolicyViolation as exc:
+        return JSONResponse({"error": str(exc)}, status_code=403)
 
 
 async def fleet(request: Request) -> JSONResponse:
@@ -237,9 +254,11 @@ async def submit(request: Request) -> JSONResponse:
     except Exception as exc:
         return JSONResponse({"error": f"invalid crn: {exc}"}, status_code=400)
 
+    # Documents are optional. Absent a path, the audit runs on statutory records
+    # and filed accounts alone rather than scanning the server's working directory.
     job_id = runtime.submit_job(
         query.crn,
-        data_room_path=str(payload.get("data_room_path", "data_room")),
+        data_room_path=str(payload.get("data_room_path", "") or ""),
         submitted_by=str(payload.get("submitted_by", "api")),
     )
     return JSONResponse({"job_id": job_id, "crn": query.crn, "status": runtime.STATUS_QUEUED}, status_code=202)
@@ -260,6 +279,31 @@ async def job_detail(request: Request) -> JSONResponse:
     if job is None:
         return JSONResponse({"error": "job not found"}, status_code=404)
     return JSONResponse(job)
+
+
+async def job_report_pdf(request: Request):
+    """Download a finished audit as a PDF."""
+
+    if (denied := _guard(request)) is not None:
+        return denied
+    job = runtime.get_job(request.path_params["job_id"])
+    if job is None:
+        return JSONResponse({"error": "job not found"}, status_code=404)
+    if job["status"] != runtime.STATUS_SUCCEEDED or not job.get("result"):
+        return JSONResponse(
+            {"error": f"job is {job['status']}; no report to export"}, status_code=409
+        )
+
+    import report_export
+
+    state = job["result"]
+    return Response(
+        content=report_export.build_pdf(state),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{report_export.suggested_filename(state)}"'
+        },
+    )
 
 
 async def job_cancel(request: Request) -> JSONResponse:
@@ -338,10 +382,12 @@ app = Starlette(
         Route("/healthz", healthz),
         Route("/readyz", readyz),
         Route("/fleet", fleet),
+        Route("/companies/search", search_companies),
         Route("/data-rooms", upload_data_room, methods=["POST"]),
         Route("/jobs", submit, methods=["POST"]),
         Route("/jobs", jobs, methods=["GET"]),
         Route("/jobs/{job_id}", job_detail),
+        Route("/jobs/{job_id}/report.pdf", job_report_pdf),
         Route("/jobs/{job_id}/cancel", job_cancel, methods=["POST"]),
         Route("/memory/{crn}", memory_view),
         Route("/memory/{crn}/notes", memory_note, methods=["POST"]),

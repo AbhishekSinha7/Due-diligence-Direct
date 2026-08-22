@@ -34,21 +34,24 @@ Auditor} in parallel -> Debate -> Synthesizer.
 | File | Role |
 | --- | --- |
 | `orchestrator.py` | Graph, agent nodes, prompts, structured schemas, deterministic fallbacks, CLI. Bootstraps the fleet at import. |
-| `mcp_server.py` | FastMCP tools over Companies House, including accounts document download with manual, host-checked redirect handling. |
+| `mcp_server.py` | FastMCP tools over Companies House: profile, insolvency, charges, filings, PSCs, officers, registers, plus accounts document download with manual, host-checked redirect handling. |
 | `accounts_parser.py` | iXBRL extraction, balance sheet mathematics, and the four accounting-identity reconciliation checks. Pure functions, no network. |
-| `data_room_loader.py` | Local PDF/CSV/TXT/MD extraction and keyword classification. |
+| `data_room_loader.py` | Local PDF/CSV/TXT/MD extraction and keyword classification (the fallback when triage is unavailable). |
+| `document_intelligence.py` | Tiered model use: Gemma document triage and embedding-based semantic clause detection. Gateway-routed, deterministic fallbacks. |
 | `agent_identity.py` | Per-agent principals, scopes, HMAC-signed short-lived tokens. |
 | `agent_registry.py` | SQLite agent cards, semantic versions, ACTIVE/DEPRECATED/RETIRED lifecycle. |
 | `gateway.py` | Single policy enforcement point for every tool and model call. |
 | `model_armor.py` | Injection screening, PII/credential redaction, citation grounding, output guardrails. |
 | `memory_bank.py` | Cross-session audit history, tracked fact sheet, deltas, operator notes. |
-| `runtime.py` | Async job execution, durable job state, events, cancellation, reconciliation. |
+| `runtime.py` | Async job execution, durable job state, events, cancellation, reconciliation, terminal-state notification. |
+| `notifications.py` | Webhook dispatch when a job finishes, fails, or is cancelled. |
+| `report_export.py` | Red Flag Report as PDF (reportlab). No network, no external fonts. |
 | `telemetry.py` | OTel spans, exporters, hash-chained audit log and verifier. |
 | `service.py` | Starlette control plane for Cloud Run. |
 | `fleet_client.py` | Backend abstraction: `RemoteBackend` (HTTP control plane) or `LocalBackend` (in-process), selected by `FLEET_API_URL`. |
 | `dashboard.py` | Streamlit fleet console. A **client** of `fleet_client`, never of the fleet modules directly. |
 | `Dockerfile`, `cloudbuild.yaml` | Cloud Run image and Cloud Build deploy pipeline. |
-| `tests/` | 53 unittest cases; `tests/__init__.py` sandboxes all fleet state paths. |
+| `tests/` | 78 unittest cases; `tests/__init__.py` sandboxes all fleet state paths. |
 | `sample_data_room/`, `sample_data_room_hostile/` | Clean and poisoned demo fixtures. |
 
 ## Financial Data Rules (non-negotiable)
@@ -68,6 +71,111 @@ Auditor} in parallel -> Debate -> Synthesizer.
   `CurrentAssets 1,688` against `NetCurrentAssets 5,558`, so its current ratio is suppressed.
 - Micro-entity filings legitimately omit turnover and cash. Report "not tagged", never estimate.
 - PDF-only filings return `no_ixbrl_available` and are escalated for manual review.
+
+## Export and Token Accounting
+
+- `report_export.build_pdf(state)` renders verdict, statutory snapshot, filed-accounts
+  figures, findings with citations, reconciliation, governance record, reasoning chain, and
+  the disclaimer. Available in the console (download button), over HTTP
+  (`GET /jobs/{id}/report.pdf`), and through both client backends (`report_pdf`).
+- `_clean()` encodes to latin-1 with replacement before anything reaches the PDF: core PDF
+  fonts cannot render emoji or astral characters and would raise mid-build. Test coverage
+  includes a state containing an emoji and a pound sign.
+- Export must never require a complete state - a partial or failed run still exports.
+- Token usage comes from `response.usage_metadata` per call, accumulated on
+  `RunContext.model_calls`, aggregated into `governance.token_usage` (calls, prompt, output,
+  total, per-call breakdown, total latency) and attached to the reasoning-chain exchanges so
+  the conversation shows tokens per message.
+- Do not add pricing: rates change and inventing them would misstate cost. Report tokens.
+
+## Notifications
+
+- `runtime._notify` fires on every terminal state (succeeded, failed, cancelled,
+  interrupted) and must never raise: a notification problem is audited, not propagated.
+- Dispatch is gateway-routed under the **runtime's own identity** (`notification.send`),
+  which is why `runtime` has an entry in `FLEET_IDENTITIES` and a registry card. Every
+  identity must have a published card - `test_every_identity_has_a_published_card` enforces it.
+- `runtime._ensure_fleet_registered()` bootstraps the registry and tools lazily, because the
+  runtime can be driven without importing the orchestrator (a worker, a test) and dispatch is
+  policy-checked.
+- The webhook URL is fixed configuration (`FLEET_NOTIFY_WEBHOOK`), never request-supplied,
+  so there is no user-controlled URL for the fleet to be pointed at.
+- The console announces terminal states with `st.toast` once per job, tracked in
+  `st.session_state["announced_jobs"]` so a 2-second fragment refresh does not re-announce.
+
+## Console Access
+
+- `FLEET_CONSOLE_ACCESS_CODE` gates the Streamlit console before it renders anything.
+  Unset means open, which is correct locally. Set it whenever the console is published
+  publicly, because a browser cannot present a Cloud Run identity token.
+- The gate is deliberately simple: it bounds who can spend model quota. Real protection of
+  the data path is IAM on the control plane plus the gateway's per-agent quota.
+
+## Company Resolution
+
+- Operators need not know a company number: the console's search dialog (`@st.dialog`)
+  calls `search_companies` and fills the number from the chosen result.
+- Search is a gateway tool like any other, held by the orchestrator identity, so the
+  control plane's `GET /companies/search` calls `gateway.call("orchestrator", ...)` rather
+  than reaching into `mcp_server`. Keep it that way.
+
+## Statutory Coverage
+
+- `collect_company_records` returns seven endpoints: profile, insolvency, charges, filings,
+  pscs, officers, registers. Adding an endpoint there needs no registry change, because the
+  gateway policy is on the bundling tool, not each endpoint.
+- The whole bundle is serialised into the legal and financial prompts, so a new endpoint is
+  available to the agents immediately; add a deterministic counterpart in
+  `_governance_findings` or `_fallback_legal` so it still surfaces without a model.
+- `_governance_findings` covers board composition (no active officers = HIGH, sole officer =
+  MEDIUM), previous company names, prior insolvency history, and disputed registered office.
+- The console's Company tab renders the full register: profile, flags, previous names,
+  officers with appointment history, PSCs and their nature of control, charges with persons
+  entitled, insolvency cases with practitioners, recent filings, and the raw payload.
+
+## Reasoning Chain (Agent Observability)
+
+- `RunContext.exchange()` records every inter-agent message. Each entry lands in three
+  places: `state["reasoning_chain"]`, an `agent.exchange` event on the active OTel span,
+  and the job event stream (attribute `exchange: True`) so clients can render it live.
+- Kinds: `task_assignment`, `context_recall`, `finding_report`, `challenge`, `rebuttal`,
+  `resolution`, `verdict`. Add new kinds to `dashboard.KIND_LABELS` too.
+- Model metadata (model id, latency, token counts) rides on the exchange attributes, which
+  is how the console shows which model answered for each agent.
+- Do not put raw prompts or full model responses on the chain: prompts contain screened but
+  untrusted document text. Summaries and digests only.
+
+## Model Tiers
+
+- **Gemma** (`gemma-4-26b-a4b-it`) triages documents; **`gemini-embedding-001`** detects
+  risk clauses semantically; **Gemini 3.5** does reasoning, debate, and verdicts.
+- Gemma and embeddings are served by the Gemini API even when Vertex AI is configured for
+  reasoning, so `document_intelligence._api_client()` deliberately uses the API key. Keep
+  `GEMINI_API_KEY` set in Cloud Run for this reason.
+- Semantic clause matching requires both an absolute similarity (0.62) and a margin over
+  the runner-up label (0.04), and segments must be >=60 chars and >=10 words. Without the
+  margin one sentence matches half the taxonomy; without the length filter the document
+  title matches everything weakly. Verified: 3 true clauses, 0 false positives, and an
+  ordinary delivery clause matches nothing.
+- Both helpers degrade: no credentials means keyword triage and no semantic scan, never an
+  exception.
+- Every tier that answers is appended to `context.models_used` and broken out in
+  `governance.model_tiers` (reasoning / document_triage / clause_detection). Without that,
+  governance reports only the reasoning model and the multi-model integration is invisible.
+- Gemma and embeddings only run when documents are present: a statutory-only audit uses
+  Gemini alone. For a demo that must show all three tiers, upload a contract.
+- Vertex AI does not serve Gemma through this path, so `GEMINI_API_KEY` must stay set in
+  Cloud Run even when `GOOGLE_GENAI_USE_VERTEXAI=true`. If that key is quota-exhausted, the
+  triage tier silently falls back to keywords - check `governance.model_tiers`.
+
+## Severity Calibration
+
+- Contract clauses from the data room are graded MEDIUM/LOW: they are conditions to
+  negotiate, not hard stops. Only statutory distress (insolvency cases, negative net assets)
+  is HIGH, and HIGH is what drives `RED FLAG DEAL BREAKER`.
+- Verified by `test_contract_clauses_alone_do_not_break_a_deal` and
+  `test_statutory_insolvency_does_break_a_deal`. Do not raise clause severities without
+  revisiting those tests: a change-of-control clause must not kill a deal on its own.
 
 ## Invariants To Preserve
 
@@ -100,9 +208,19 @@ Auditor} in parallel -> Debate -> Synthesizer.
 - SQLite connections use the `_db()` context manager in each module; plain `_connect()`
   inside a `with` leaks the connection and raises ResourceWarnings.
 - Streamlit live job panel uses `@st.fragment(run_every=2)`.
+- `get_backend` is `@st.cache_resource` keyed on the client module's mtime. Without that
+  fingerprint, editing `fleet_client.py` leaves a stale cached instance behind and the
+  console fails with AttributeError on any newly added method. Restarting Streamlit also
+  clears it, but the fingerprint means you do not have to remember.
+- `BackendParityTests` asserts both backends implement every `FleetBackend` protocol
+  member; add a method to one and the suite fails until the other has it.
 - The dashboard must go through `fleet_client`, never import `runtime`, `telemetry`,
   `agent_registry`, `memory_bank`, or `orchestrator` directly. That indirection is what lets
   one console drive either a local fleet or the deployed Cloud Run control plane.
+- There is no data room picker. Documents arrive by upload only, or the audit is
+  statutory-only. A blank `data_room_path` must always mean "no documents": both
+  `data_room_loader.load_data_room` and the ingestion node guard against it, because
+  `Path("")` resolves to the working directory and would sweep the whole app into a prompt.
 - Uploads work in both modes: `POST /data-rooms` stores base64 documents on the fleet's disk
   and returns the `data_room_path` to audit against. Filenames are stripped to their base name
   (no traversal), extensions are allowlisted, and size/count are capped.

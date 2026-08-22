@@ -40,6 +40,7 @@ TRACKED_FACTS = (
     "charge_count",
     "insolvency_cases",
     "psc_count",
+    "active_officers",
     "net_assets",
     "accounts_period_end",
 )
@@ -106,6 +107,7 @@ def extract_facts(bundle: dict[str, Any], accounts: dict[str, Any] | None = None
     charges = data("charges")
     insolvency = data("insolvency")
     pscs = data("pscs")
+    officers = data("officers")
 
     charge_items = charges.get("items", [])
     psc_items = pscs.get("items", [])
@@ -123,6 +125,7 @@ def extract_facts(bundle: dict[str, Any], accounts: dict[str, Any] | None = None
         "charge_count": int(charges.get("total_count", 0) or (len(charge_items) if isinstance(charge_items, list) else 0)),
         "insolvency_cases": len(insolvency_cases) if isinstance(insolvency_cases, list) else 0,
         "psc_count": int(pscs.get("total_results", 0) or (len(psc_items) if isinstance(psc_items, list) else 0)),
+        "active_officers": int(officers.get("active_count", 0) or 0),
     }
 
 

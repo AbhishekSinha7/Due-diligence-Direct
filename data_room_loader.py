@@ -109,6 +109,17 @@ def extract_document(path: Path, max_chars: int = MAX_CHARS_PER_FILE) -> dict[st
 
 
 def load_data_room(folder: str | Path = "data_room") -> dict[str, Any]:
+    # An empty or bare-dot path would resolve to the working directory and sweep the
+    # whole application into a prompt. Treat "no folder" as "no documents".
+    if not folder or str(folder).strip() in {"", ".", "./"}:
+        return {
+            "status": "not_provided",
+            "folder": "",
+            "documents": [],
+            "errors": [],
+            "message": "No deal documents were supplied; the audit is statutory-only.",
+        }
+
     root = Path(folder)
     if not root.exists():
         return {

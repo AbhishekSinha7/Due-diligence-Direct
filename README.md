@@ -51,6 +51,28 @@ arithmetic instead — a real filing in the demo tags `CurrentAssets 1,688` agai
 Filings published only as scanned PDFs are reported as requiring manual review rather than
 guessed at. The data room folder is for *contractual* material that has no statutory filing.
 
+## Compliance posture
+
+This fleet reads **live production data** - the UK Companies House statutory register and
+companies' own filed accounts - rather than synthetic stand-ins, and does so under
+enterprise controls:
+
+- **Read-only.** Statutory access is exclusively HTTP `GET`. The fleet cannot alter the
+  register. Every mutation - jobs, memory, audit records, uploads - stays in the
+  deployment's own storage.
+- **Public by statute.** The register is published under the Companies Act; personal data
+  in it (officers, PSCs) is processed for the KYB purpose it exists for, displayed as filed
+  and never enriched from private sources.
+- **In-region.** Cloud Run and all fleet state run in `europe-west1`, recorded as
+  `FLEET_DATA_REGION` on every trace and audit record. Model inference uses Vertex AI's
+  `global` endpoint because `europe-west1` does not serve `gemini-3.5-flash`; storage and
+  statutory data stay in the EU. Pin `GOOGLE_CLOUD_LOCATION` for stricter residency.
+- **Least privilege.** Each agent holds only the scopes its card declares; the Debate agent
+  cannot reach Companies House at all.
+- **Tamper-evident.** Hash-chained audit log, verifiable at `/audit/verify`.
+
+Full detail, including what this deliberately does not claim: [ARCHITECTURE.md](ARCHITECTURE.md) section 5.
+
 ## The agents
 
 1. **Orchestrator** - plans the run, pulls statutory records, downloads and parses the filed accounts, loads the data room, recalls memory, fans out.
@@ -138,7 +160,9 @@ curl localhost:8080/fleet             # registry, identities, tool policies
 curl localhost:8080/audit/verify      # audit hash chain proof
 ```
 
-Endpoints: `/healthz`, `/readyz`, `/fleet`, `POST /jobs`, `GET /jobs`,
+Endpoints: `/healthz`, `/readyz`, `/fleet`, `GET /companies/search?q=`,
+`GET /jobs/{id}/report.pdf`,
+`POST /data-rooms`, `POST /jobs`, `GET /jobs`,
 `GET /jobs/{id}`, `POST /jobs/{id}/cancel`, `GET /memory/{crn}`,
 `POST /memory/{crn}/notes`, `GET /audit`, `GET /audit/verify`.
 Set `FLEET_API_KEY` to require an `x-fleet-api-key` header.
@@ -157,6 +181,88 @@ gcloud builds submit --config cloudbuild.yaml \
 Cloud Run runs with `--no-cpu-throttling` so background diligence jobs keep
 executing after the HTTP response is returned, and `--no-allow-unauthenticated`
 so IAM guards the control plane.
+
+## Reproducible testing
+
+Every claim in this README can be checked. Nothing below needs Google Cloud, and the
+test suite needs no network or API keys at all.
+
+### 1. Install
+
+```powershell
+python -m venv venv
+venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+### 2. Run the test suite (no credentials required)
+
+```powershell
+venv\Scripts\python.exe -m unittest discover -s tests -t .
+```
+
+Expected: **78 tests, OK, in under 10 seconds.** They cover iXBRL parsing and the
+accounting-identity gate, identity token forgery and expiry, registry versioning and
+lifecycle, every gateway denial path, Model Armor injection and grounding, memory deltas,
+runtime cancellation and failure, notification dispatch, PDF export, and audit-chain
+verification. `tests/__init__.py` sandboxes all fleet state, so runs leave nothing behind.
+
+### 3. Run an audit offline (no API keys)
+
+```powershell
+venv\Scripts\python.exe orchestrator.py 03994971 --no-save
+```
+
+With no keys set the tool layer reports `config_missing` and the deterministic engine
+produces the analysis. Expected: a verdict, cited findings, and
+`analysis mode: deterministic` in the governance block. **The run always completes** -
+that is the point of the fallback.
+
+### 4. Run an audit against live data
+
+Create `.env` from [.env.example](.env.example) with a free
+[Companies House API key](https://developer.company-information.service.gov.uk/) and a
+[Gemini API key](https://aistudio.google.com/apikey), then:
+
+```powershell
+venv\Scripts\python.exe orchestrator.py 03994971 --no-save
+```
+
+Expected: seven statutory endpoints collected, two accounts filings parsed, ~14 iXBRL
+figures extracted, and `analysis mode: model`.
+
+### 5. Verify the fleet controls individually
+
+```powershell
+# Model Armor: a poisoned document is quarantined and reported as a finding
+venv\Scripts\python.exe orchestrator.py 03994971 --data-room sample_data_room_hostile --no-save
+
+# Agent Identity: an agent cannot obtain a scope it does not hold
+venv\Scripts\python.exe -c "import agent_identity as a; a.mint_token('debate', audience='fleet-gateway', scopes=[a.SCOPE_STATUTORY_READ])"
+
+# Agent Gateway: an agent cannot call a tool absent from its published card
+venv\Scripts\python.exe -c "import gateway, orchestrator; gateway.call('debate','collect_company_records', crn='03994971')"
+
+# Filed accounts: deterministic iXBRL extraction on its own
+venv\Scripts\python.exe -c "import json, mcp_server; print(json.dumps(mcp_server.analyze_statutory_accounts(mcp_server.CompanyQuery(crn='03994971'))['latest']['analysis']['derived'], indent=2))"
+```
+
+Expected, in order: `Quarantined 1 document(s)`; **IdentityError**; **PolicyViolation**;
+and a JSON block of computed balance sheet metrics.
+
+### 6. Run the console and the control plane
+
+```powershell
+venv\Scripts\python.exe -m streamlit run dashboard.py          # http://localhost:8501
+venv\Scripts\python.exe -m uvicorn service:app --port 8080     # http://localhost:8080
+```
+
+The service index at `/` lists every endpoint. `GET /audit/verify` recomputes the audit
+hash chain and should report `{"valid": true, ...}`.
+
+### 7. Deploy to Google Cloud
+
+See [Deploy to Google Cloud](#deploy-to-google-cloud) below, or the step-by-step
+walkthrough with IAM roles and secrets in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Demo script
 

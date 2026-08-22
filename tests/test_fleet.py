@@ -5,6 +5,7 @@ import unittest
 
 import agent_identity
 import agent_registry
+from tests.test_core import EnvironmentPatch
 import gateway
 import memory_bank
 import model_armor
@@ -62,8 +63,23 @@ class RegistryTests(unittest.TestCase):
         agents = {card["agent_id"] for card in agent_registry.list_agents()}
         self.assertEqual(
             agents,
-            {"orchestrator", "legal_risk", "financial_auditor", "debate", "synthesizer"},
+            {
+                "orchestrator",
+                "legal_risk",
+                "financial_auditor",
+                "debate",
+                "synthesizer",
+                # The runtime calls a tool (notification dispatch), so it holds an
+                # identity and a card like anything else that reaches the gateway.
+                "runtime",
+            },
         )
+
+    def test_every_identity_has_a_published_card(self):
+        import agent_identity as identities
+
+        published = {card["agent_id"] for card in agent_registry.list_agents()}
+        self.assertEqual(set(identities.FLEET_IDENTITIES), published)
 
     def test_resolve_prefers_highest_active_version(self):
         agent_registry.publish_agent(
@@ -321,7 +337,7 @@ class DataRoomFindingTests(unittest.TestCase):
             ]
         }
 
-    def test_change_of_control_is_high_severity_with_excerpt(self):
+    def test_change_of_control_is_flagged_with_excerpt(self):
         import orchestrator
 
         findings = orchestrator._data_room_findings(
@@ -330,9 +346,36 @@ class DataRoomFindingTests(unittest.TestCase):
             )
         )
         change = next(f for f in findings if "Change of Control" in f["category"])
-        self.assertEqual(change["severity"], "HIGH")
+        # A contract clause is a condition to negotiate, not a hard stop, so it must
+        # not on its own drive a RED FLAG DEAL BREAKER verdict.
+        self.assertEqual(change["severity"], "MEDIUM")
         self.assertIn("customer_msa.txt", change["evidentiary_quote"])
         self.assertIn("change of control", change["evidentiary_quote"].lower())
+
+    def test_contract_clauses_alone_do_not_break_a_deal(self):
+        import orchestrator
+
+        legal = orchestrator._fallback_legal(
+            {"insolvency": {"status": "not_found"}, "charges": {"status": "success", "data": {}}},
+            None,
+            self._data_room(
+                "Change of control termination applies. The supplier accepts an uncapped "
+                "indemnity for confidentiality breaches."
+            ),
+        )
+        deal = orchestrator._fallback_deal(legal, {"findings": []}, {"points": []}, [])
+        self.assertEqual(deal["recommendation"], "PROCEED WITH CAUTION")
+
+    def test_statutory_insolvency_does_break_a_deal(self):
+        import orchestrator
+
+        legal = orchestrator._fallback_legal(
+            {"insolvency": {"status": "success", "data": {"cases": [{"type": "liquidation"}]}}},
+            None,
+            None,
+        )
+        deal = orchestrator._fallback_deal(legal, {"findings": []}, {"points": []}, [])
+        self.assertEqual(deal["recommendation"], "RED FLAG DEAL BREAKER")
 
     def test_quarantined_document_is_reported_not_analysed(self):
         import orchestrator
@@ -362,6 +405,302 @@ class DataRoomFindingTests(unittest.TestCase):
         )
         categories = [risk["category"] for risk in report["risks"]]
         self.assertTrue(any("Uncapped Indemnity" in category for category in categories))
+
+
+class DocumentIntelligenceTests(unittest.TestCase):
+    """Tiered model helpers must degrade safely and stay precise."""
+
+    def test_triage_falls_back_to_keywords_without_credentials(self):
+        import document_intelligence
+
+        with EnvironmentPatch("GEMINI_API_KEY"):
+            result = document_intelligence.classify_documents(
+                [{"file_name": "msa.txt", "text_excerpt": "This agreement includes an indemnity."}]
+            )
+        self.assertEqual(result["status"], "fallback")
+        self.assertEqual(result["model"], "keyword-heuristic")
+        self.assertEqual(result["classifications"][0]["classification"], "legal")
+
+    def test_clause_scan_is_unavailable_without_credentials(self):
+        import document_intelligence
+
+        with EnvironmentPatch("GEMINI_API_KEY"):
+            result = document_intelligence.semantic_clause_scan(
+                [{"file_name": "msa.txt", "text_excerpt": "Change of control applies."}]
+            )
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["matches"], [])
+
+    def test_segments_exclude_titles_and_short_lines(self):
+        import document_intelligence
+
+        segments = document_intelligence._segments(
+            "SUPPLY AGREEMENT (SYNTHETIC)\n\n"
+            "Should ownership of the Supplier pass to a third party, the Customer may end "
+            "this agreement by serving thirty days written notice.\n\nClause 4.\n"
+        )
+        self.assertEqual(len(segments), 1)
+        self.assertIn("ownership of the Supplier", segments[0])
+
+    def test_cosine_similarity_bounds(self):
+        import document_intelligence
+
+        self.assertAlmostEqual(document_intelligence._cosine([1.0, 0.0], [1.0, 0.0]), 1.0)
+        self.assertAlmostEqual(document_intelligence._cosine([1.0, 0.0], [0.0, 1.0]), 0.0)
+        self.assertEqual(document_intelligence._cosine([0.0, 0.0], [1.0, 1.0]), 0.0)
+
+    def test_semantic_matches_become_findings(self):
+        import orchestrator
+
+        data_room = {
+            "documents": [],
+            "semantic_clauses": {
+                "matches": [
+                    {
+                        "file_name": "supply.txt",
+                        "clause": "Change of Control",
+                        "similarity": 0.77,
+                        "excerpt": "Should ownership of the Supplier pass to a third party",
+                    }
+                ]
+            },
+        }
+        findings = orchestrator._data_room_findings(data_room)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("Change of Control", findings[0]["category"])
+        self.assertIn("semantic match", findings[0]["finding"])
+        self.assertEqual(findings[0]["severity"], "MEDIUM")
+
+
+class ReportExportTests(unittest.TestCase):
+    STATE = {
+        "crn": "03994971",
+        "run_id": "20260818T090000Z",
+        "red_flag_verdict": {
+            "recommendation": "PROCEED WITH CAUTION",
+            "executive_summary": "Net assets fell 80% and the filing contradicts itself.",
+            "top_risks": ["Filing fails its working capital identity"],
+            "required_human_review": ["Verify the balance sheet against the source document"],
+            "reliance_disclaimer": "AI-generated support only. Not legal advice; verify sources.",
+        },
+        "legal_risks": {
+            "risks": [
+                {
+                    "category": "Board Composition",
+                    "severity": "MEDIUM",
+                    "finding": "Sole active officer.",
+                    "evidentiary_quote": "officers.active_count=1",
+                    "evidence_verified": True,
+                }
+            ]
+        },
+        "financial_analysis": {"findings": []},
+        "debate_transcript": {"points": []},
+        "memory": {"current_facts": {"company_name": "EXAMPLE TRADING LIMITED", "charge_count": 0}},
+        "accounts": {
+            "latest": {"filing_date": "2026-02-20", "description": "micro-entity"},
+            "status": "success",
+        },
+        "governance": {
+            "trace_id": "trace-abc",
+            "analysis_mode": "model",
+            "models_used": ["gemini-3.5-flash"],
+            "token_usage": {
+                "calls": 4,
+                "prompt_tokens": 40000,
+                "output_tokens": 2000,
+                "total_tokens": 42000,
+                "by_call": [],
+            },
+        },
+        "reasoning_chain": [
+            {"seq": 1, "sender": "orchestrator", "recipient": "legal_risk", "kind": "task_assignment", "message": "Audit 03994971."}
+        ],
+    }
+
+    def _text(self, pdf: bytes) -> str:
+        from io import BytesIO
+
+        from pypdf import PdfReader
+
+        return "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(pdf)).pages)
+
+    def test_pdf_is_produced_with_the_report_content(self):
+        import report_export
+
+        pdf = report_export.build_pdf(self.STATE)
+        self.assertTrue(pdf.startswith(b"%PDF"))
+        text = self._text(pdf)
+        self.assertIn("EXAMPLE TRADING LIMITED", text)
+        self.assertIn("PROCEED WITH CAUTION", text)
+        self.assertIn("Board Composition", text)
+        self.assertIn("trace-abc", text)
+
+    def test_token_usage_appears_in_the_governance_record(self):
+        import report_export
+
+        text = self._text(report_export.build_pdf(self.STATE))
+        self.assertIn("42,000", text)
+        self.assertIn("4 model call", text)
+
+    def test_export_survives_a_sparse_state(self):
+        # A failed or partial run must still export rather than raise.
+        import report_export
+
+        pdf = report_export.build_pdf({"crn": "03994971"})
+        self.assertTrue(pdf.startswith(b"%PDF"))
+        self.assertIn("Not legal", self._text(pdf))
+
+    def test_non_latin1_characters_do_not_break_export(self):
+        import report_export
+
+        state = dict(self.STATE)
+        state["red_flag_verdict"] = dict(
+            self.STATE["red_flag_verdict"],
+            executive_summary="Cash fell by £22,224 — see 🔴 flag.",
+        )
+        pdf = report_export.build_pdf(state)
+        self.assertTrue(pdf.startswith(b"%PDF"))
+
+    def test_filename_is_derived_from_the_company(self):
+        import report_export
+
+        name = report_export.suggested_filename(self.STATE)
+        self.assertTrue(name.endswith(".pdf"))
+        self.assertIn("example-trading-limited", name)
+        self.assertIn("03994971", name)
+
+
+class NotificationTests(unittest.TestCase):
+    SUCCEEDED_JOB = {
+        "job_id": "job-1",
+        "crn": "03994971",
+        "status": "SUCCEEDED",
+        "trace_id": "trace-1",
+        "result": {
+            "red_flag_verdict": {
+                "recommendation": "RED FLAG DEAL BREAKER",
+                "executive_summary": "Active liquidation proceedings.",
+                "top_risks": ["Insolvency case open", "25 outstanding charges"],
+            },
+            "governance": {"severity_counts": {"HIGH": 2}, "analysis_mode": "model"},
+            "memory": {"current_facts": {"company_name": "EXAMPLE TARGET LTD"}},
+        },
+    }
+
+    def test_payload_carries_the_verdict_and_evidence(self):
+        import notifications
+
+        payload = notifications.build_payload(self.SUCCEEDED_JOB)
+        self.assertEqual(payload["event"], "diligence.job.finished")
+        self.assertEqual(payload["recommendation"], "RED FLAG DEAL BREAKER")
+        self.assertEqual(payload["company_name"], "EXAMPLE TARGET LTD")
+        self.assertEqual(len(payload["top_risks"]), 2)
+        self.assertEqual(payload["trace_id"], "trace-1")
+        # Slack and Google Chat both render a top-level `text` field.
+        self.assertIn("RED FLAG DEAL BREAKER", payload["text"])
+
+    def test_failed_job_payload_carries_the_error(self):
+        import notifications
+
+        payload = notifications.build_payload(
+            {"job_id": "job-2", "crn": "03994971", "status": "FAILED", "error": "boom"}
+        )
+        self.assertEqual(payload["status"], "FAILED")
+        self.assertEqual(payload["error"], "boom")
+        self.assertEqual(payload["top_risks"], [])
+
+    def test_dispatch_is_disabled_without_a_configured_webhook(self):
+        import notifications
+
+        original = notifications.WEBHOOK_URL
+        notifications.WEBHOOK_URL = ""
+        try:
+            self.assertEqual(notifications.dispatch(self.SUCCEEDED_JOB)["status"], "disabled")
+        finally:
+            notifications.WEBHOOK_URL = original
+
+    def test_notification_failure_never_breaks_the_job(self):
+        # An unreachable webhook must leave the job SUCCEEDED, not FAILED.
+        import notifications
+
+        original = notifications.WEBHOOK_URL
+        notifications.WEBHOOK_URL = "http://127.0.0.1:9/unreachable"
+        try:
+            job_id = runtime.submit_job(
+                "03994971",
+                runner=lambda crn, **kwargs: {"crn": crn, "red_flag_verdict": {}},
+            )
+            job = runtime.wait_for(job_id, timeout_seconds=30)
+            self.assertEqual(job["status"], runtime.STATUS_SUCCEEDED)
+        finally:
+            notifications.WEBHOOK_URL = original
+
+
+class BackendParityTests(unittest.TestCase):
+    """Both backends must implement the whole client interface.
+
+    The console talks to whichever backend is configured, so a method added to one
+    and forgotten on the other only fails in front of a user.
+    """
+
+    def _protocol_members(self) -> set[str]:
+        import typing
+
+        import fleet_client
+
+        try:
+            return set(typing.get_protocol_members(fleet_client.FleetBackend))
+        except AttributeError:  # older typing
+            return {
+                name
+                for name in dir(fleet_client.FleetBackend)
+                if not name.startswith("_") and name not in {"mode", "description"}
+            }
+
+    def test_local_backend_implements_the_interface(self):
+        import fleet_client
+
+        backend = fleet_client.LocalBackend()
+        missing = [name for name in self._protocol_members() if not hasattr(backend, name)]
+        self.assertEqual(missing, [], f"LocalBackend is missing: {missing}")
+
+    def test_remote_backend_implements_the_interface(self):
+        import fleet_client
+
+        backend = fleet_client.RemoteBackend("http://control-plane.invalid")
+        missing = [name for name in self._protocol_members() if not hasattr(backend, name)]
+        self.assertEqual(missing, [], f"RemoteBackend is missing: {missing}")
+
+    def test_backend_selection_follows_the_url(self):
+        import fleet_client
+
+        self.assertEqual(fleet_client.get_backend("https://fleet.invalid").mode, "remote")
+        self.assertEqual(fleet_client.get_backend("").mode, "local")
+
+
+class CompanySearchTests(unittest.TestCase):
+    def test_short_query_is_rejected_before_any_request(self):
+        import mcp_server
+
+        result = mcp_server.search_companies("a")
+        self.assertEqual(result["status"], "invalid_query")
+        self.assertEqual(result["results"], [])
+
+    def test_missing_credentials_reported_not_raised(self):
+        import mcp_server
+
+        with EnvironmentPatch("COMPANIES_HOUSE_API_KEY"):
+            result = mcp_server.search_companies("example trading")
+        self.assertEqual(result["status"], "config_missing")
+        self.assertEqual(result["results"], [])
+
+    def test_search_requires_a_published_capability(self):
+        # The debate agent has neither the scope nor the tool on its card.
+        agent_registry.bootstrap_registry("gemini-3.5-flash")
+        gateway.bootstrap_tools()
+        with self.assertRaises(gateway.PolicyViolation):
+            gateway.call("debate", "search_companies", query="example")
 
 
 class TelemetryTests(unittest.TestCase):

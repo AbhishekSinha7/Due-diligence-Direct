@@ -126,6 +126,23 @@ class CoreBehaviorTests(unittest.TestCase):
         self.assertEqual(result["status"], "not_found")
         self.assertEqual(result["documents"], [])
 
+    def test_empty_path_does_not_scan_the_working_directory(self):
+        # A blank path must mean "no documents", never "everything under cwd".
+        for blank in ("", "   ", ".", "./", None):
+            result = data_room_loader.load_data_room(blank)
+            self.assertEqual(result["status"], "not_provided")
+            self.assertEqual(result["documents"], [])
+
+    def test_statutory_only_run_completes_without_documents(self):
+        with EnvironmentPatch("COMPANIES_HOUSE_API_KEY", "GEMINI_API_KEY"):
+            state = run_due_diligence("03994971", save_artifact=False, data_room_path="")
+
+        self.assertEqual(state["data_room"]["status"], "not_provided")
+        self.assertIn(
+            state["red_flag_verdict"]["recommendation"],
+            {"GREEN LIGHT", "PROCEED WITH CAUTION", "RED FLAG DEAL BREAKER"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
