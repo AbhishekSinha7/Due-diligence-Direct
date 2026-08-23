@@ -1713,7 +1713,14 @@ def _print_report(final_state: DueDiligenceState) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the DueDiligence Direct agent fleet.")
     parser.add_argument("crn", nargs="?", default="03994971", help="UK company registration number")
-    parser.add_argument("--data-room", default="data_room", help="Folder with PDF, CSV, TXT, or MD deal documents")
+    # Defaults to no documents, matching POST /jobs. It used to default to
+    # "data_room", which is the *upload root*: every document any caller had ever
+    # uploaded, for any company, was ingested into every CLI run.
+    parser.add_argument(
+        "--data-room",
+        default="",
+        help="Folder with PDF, CSV, TXT, or MD deal documents. Omit to audit statutory records alone.",
+    )
     parser.add_argument("--async-job", action="store_true", help="Submit to the async Agent Runtime instead of running inline")
     parser.add_argument("--no-save", action="store_true", help="Do not save a JSON run artifact")
     parser.add_argument("--json", action="store_true", help="Print the full final state as JSON")

@@ -8,4 +8,7 @@ telemetry/
 .fleet/
 data_room/*
 !data_room/.gitkeep
-.streamlit/
+docs/*
+BLOG_POST.md
+ARCHITECTURE.md
+SOCIAL_POST.md

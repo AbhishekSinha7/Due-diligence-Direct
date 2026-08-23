@@ -11,7 +11,7 @@ Report with a citation for every claim.
 ```mermaid
 flowchart TB
     subgraph Clients
-        UI[Streamlit fleet console]
+        UI[Operator console]
         CLI[orchestrator.py CLI]
         API[HTTP client]
     end
@@ -123,7 +123,7 @@ command that proves it, so none of this has to be taken on trust.
 | **Memory Bank**<br>secure cross-session context | Per-company audit history, tracked statutory fact sheet, operator notes, significance-scored deltas injected into every agent prompt | `curl -H "Authorization: Bearer $TOKEN" $URL/memory/03994971 \| jq '.prior_audits, .changes_since_last_audit'` |
 | **Agent Identity**<br>zero-trust access control | Each agent is a principal with its own scopes and short-lived HMAC-signed tokens, verified per call. Signing key from Secret Manager | `python -c "import agent_identity as a; a.mint_token('debate', audience='fleet-gateway', scopes=[a.SCOPE_STATUTORY_READ])"` → **IdentityError**: the Debate agent cannot obtain statutory scope |
 | **Agent Gateway**<br>unified routing and policy | One choke point: identity → registry lifecycle → published capability → scope → egress allowlist → per-agent quota → retry, with terminal errors failing fast. Allow *and* deny are audited | `python -c "import gateway, orchestrator; gateway.call('debate','collect_company_records', crn='03994971')"` → **PolicyViolation**, and the denial appears in `/audit` |
-| **Model Armor**<br>injection, poisoning, PII | Untrusted documents screened before any prompt: single-vector injection neutralised, multi-vector quarantined, credentials and PII redacted. Model output grounded — every citation string-matched to source, unverifiable HIGH claims demoted | `python orchestrator.py 03994971 --data-room sample_data_room_hostile --no-save` → **`Quarantined 1 document(s)`**, and the tampering is reported as a finding |
+| **Model Armor**<br>injection, poisoning, PII | Untrusted documents screened before any prompt: single-vector injection neutralised, multi-vector quarantined, credentials and PII redacted. Model output grounded — every citation string-matched to source, unverifiable HIGH claims demoted | `python orchestrator.py 03994971 --data-room fixtures/deal_documents_tampered --no-save` → **`Quarantined 1 document(s)`**, and the tampering is reported as a finding |
 | **Agent Observability**<br>OTel logs and reasoning traces | OTel span per agent stage exported to Cloud Trace, `agent.exchange` events carrying the full inter-agent reasoning chain, plus a hash-chained audit log | `curl -H "Authorization: Bearer $TOKEN" $URL/audit/verify` → `{"valid": true, ...}`; each job returns a `trace_id` resolvable in Cloud Trace |
 | **Gemini 3.5 or newer** | `gemini-3.5-flash` on Vertex AI with Pydantic-constrained structured output | `jq '.result.governance.model_tiers'` on any finished job |
 | **Additional Google models** | Gemma (`gemma-4-26b-a4b-it`) triages documents; `gemini-embedding-001` detects paraphrased risk clauses | same `model_tiers` block shows all three tiers |
