@@ -14,9 +14,9 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY *.py ./
-COPY sample_data_room ./sample_data_room
-COPY sample_data_room_hostile ./sample_data_room_hostile
-COPY demo_scenarios.json ./
+COPY fixtures/deal_documents ./fixtures/deal_documents
+COPY fixtures/deal_documents_tampered ./fixtures/deal_documents_tampered
+COPY web ./web
 
 RUN mkdir -p /var/fleet/telemetry /var/fleet/runs /app/data_room
 

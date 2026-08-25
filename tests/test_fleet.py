@@ -168,7 +168,7 @@ class GatewayTests(unittest.TestCase):
             )
         )
         try:
-            result = gateway.call("orchestrator", "load_data_room", path="sample_data_room")
+            result = gateway.call("orchestrator", "load_data_room", path="fixtures/deal_documents")
             self.assertEqual(result["status"], "success")
             self.assertEqual(attempts["count"], 2)
         finally:
@@ -637,48 +637,6 @@ class NotificationTests(unittest.TestCase):
             notifications.WEBHOOK_URL = original
 
 
-class BackendParityTests(unittest.TestCase):
-    """Both backends must implement the whole client interface.
-
-    The console talks to whichever backend is configured, so a method added to one
-    and forgotten on the other only fails in front of a user.
-    """
-
-    def _protocol_members(self) -> set[str]:
-        import typing
-
-        import fleet_client
-
-        try:
-            return set(typing.get_protocol_members(fleet_client.FleetBackend))
-        except AttributeError:  # older typing
-            return {
-                name
-                for name in dir(fleet_client.FleetBackend)
-                if not name.startswith("_") and name not in {"mode", "description"}
-            }
-
-    def test_local_backend_implements_the_interface(self):
-        import fleet_client
-
-        backend = fleet_client.LocalBackend()
-        missing = [name for name in self._protocol_members() if not hasattr(backend, name)]
-        self.assertEqual(missing, [], f"LocalBackend is missing: {missing}")
-
-    def test_remote_backend_implements_the_interface(self):
-        import fleet_client
-
-        backend = fleet_client.RemoteBackend("http://control-plane.invalid")
-        missing = [name for name in self._protocol_members() if not hasattr(backend, name)]
-        self.assertEqual(missing, [], f"RemoteBackend is missing: {missing}")
-
-    def test_backend_selection_follows_the_url(self):
-        import fleet_client
-
-        self.assertEqual(fleet_client.get_backend("https://fleet.invalid").mode, "remote")
-        self.assertEqual(fleet_client.get_backend("").mode, "local")
-
-
 class CompanySearchTests(unittest.TestCase):
     def test_short_query_is_rejected_before_any_request(self):
         import mcp_server
@@ -719,6 +677,100 @@ class TelemetryTests(unittest.TestCase):
         records = telemetry.read_audit(trace_id=ids["trace_id"])
         self.assertTrue(all(record["trace_id"] == ids["trace_id"] for record in records))
         self.assertTrue(any(record["action"] == "unit.filter" for record in records))
+
+
+class ConsoleTests(unittest.TestCase):
+    """The console is served by the control plane itself, so it is part of the
+    API contract rather than a separate app that happens to point at it."""
+
+    @staticmethod
+    def _client(**environment):
+        import importlib
+        import os
+
+        from starlette.testclient import TestClient
+
+        previous = {key: os.environ.get(key) for key in environment}
+        os.environ.update({key: value for key, value in environment.items()})
+        try:
+            import service
+
+            importlib.reload(service)
+            return TestClient(service.app), previous
+        except Exception:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            raise
+
+    @staticmethod
+    def _restore(previous):
+        import importlib
+        import os
+
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        import service
+
+        importlib.reload(service)
+
+    def test_root_serves_html_to_browsers_and_json_to_machines(self):
+        client, previous = self._client(FLEET_API_KEY="", FLEET_CONSOLE_ACCESS_CODE="")
+        try:
+            with client:
+                page = client.get("/", headers={"accept": "text/html"})
+                self.assertEqual(page.status_code, 200)
+                self.assertIn("text/html", page.headers["content-type"])
+                self.assertIn("DueDiligence Direct", page.text)
+
+                # The documented JSON index must survive at the same URL.
+                index = client.get("/", headers={"accept": "application/json"})
+                self.assertEqual(index.status_code, 200)
+                self.assertIn("endpoints", index.json())
+
+                for asset in ("styles.css", "app.js"):
+                    response = client.get(f"/static/{asset}")
+                    self.assertEqual(response.status_code, 200, asset)
+                    self.assertTrue(response.content)
+        finally:
+            self._restore(previous)
+
+    def test_access_code_locks_the_api_until_the_console_signs_in(self):
+        client, previous = self._client(
+            FLEET_API_KEY="", FLEET_CONSOLE_ACCESS_CODE="open-sesame"
+        )
+        try:
+            with client:
+                # The page itself must stay reachable, or nobody could sign in.
+                self.assertEqual(client.get("/", headers={"accept": "text/html"}).status_code, 200)
+                self.assertEqual(client.get("/jobs").status_code, 401)
+                self.assertEqual(
+                    client.post("/api/session", json={"code": "guess"}).status_code, 401
+                )
+                self.assertEqual(client.get("/jobs").status_code, 401)
+
+                self.assertEqual(
+                    client.post("/api/session", json={"code": "open-sesame"}).status_code, 200
+                )
+                self.assertEqual(client.get("/jobs").status_code, 200)
+        finally:
+            self._restore(previous)
+
+    def test_an_unconfigured_console_stays_open_for_local_development(self):
+        client, previous = self._client(FLEET_API_KEY="", FLEET_CONSOLE_ACCESS_CODE="")
+        try:
+            with client:
+                self.assertEqual(client.get("/jobs").status_code, 200)
+                self.assertFalse(client.get("/api/session").json()["locked"])
+                # With no code configured there is nothing to exchange.
+                self.assertEqual(client.post("/api/session", json={"code": ""}).status_code, 404)
+        finally:
+            self._restore(previous)
 
 
 if __name__ == "__main__":

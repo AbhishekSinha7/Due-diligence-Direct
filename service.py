@@ -27,6 +27,8 @@ from __future__ import annotations
 import base64
 import binascii
 import contextlib
+import hashlib
+import hmac
 import json
 import os
 import uuid
@@ -35,49 +37,280 @@ from pathlib import Path
 from typing import Any
 
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
-from starlette.routing import Route
+from starlette.responses import FileResponse, JSONResponse, Response
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
 
 import agent_identity
 import agent_registry
+import api_keys
 import gateway
 import mcp_server
 import memory_bank
 import orchestrator
 import runtime
+import security
 import telemetry
 
 API_KEY = os.getenv("FLEET_API_KEY", "").strip()
+CONSOLE_ACCESS_CODE = os.getenv("FLEET_CONSOLE_ACCESS_CODE", "").strip()
+CONSOLE_COOKIE = "fleet_console"
+WEB_ROOT = Path(__file__).parent / "web"
+
+# Bounds runaway model spend: a signed-in caller can still queue work, but not
+# an unbounded amount of it.
+MAX_PENDING_JOBS = int(os.getenv("FLEET_MAX_PENDING_JOBS", "25"))
+MAX_PAGE_SIZE = int(os.getenv("FLEET_MAX_PAGE_SIZE", "100"))
+
+SIGNIN_THROTTLE = security.SignInThrottle()
+REQUEST_LIMITER = security.RateLimiter()
+AUDIT_LIMITER = security.RateLimiter()
 
 
-def _authorized(request: Request) -> bool:
-    """Cloud Run IAM is the primary control; this is defence in depth."""
+def _console_token() -> str:
+    """A cookie value derived from the access code, so the code itself never
+    travels back to the browser and cannot be read out of storage."""
 
-    if not API_KEY:
-        return True
+    material = f"console:{CONSOLE_ACCESS_CODE}".encode("utf-8")
+    return hmac.new(agent_identity._signing_key(), material, hashlib.sha256).hexdigest()
+
+
+def _presented_secret(request: Request) -> str:
+    """The credential the caller sent, from either accepted header."""
+
     presented = request.headers.get("x-fleet-api-key", "")
     authorization = request.headers.get("authorization", "")
     if authorization.lower().startswith("bearer "):
         presented = presented or authorization[7:]
-    return presented == API_KEY
+    return presented
 
 
-def _guard(request: Request) -> JSONResponse | None:
-    if _authorized(request):
-        return None
+def _principal(request: Request) -> api_keys.Principal | None:
+    """Identify the caller, or None if they are not authenticated.
+
+    Four routes in, in order of specificity: an issued per-caller key, the legacy
+    shared secret, a console session cookie, and finally an unconfigured
+    deployment which is open by design for local development.
+    """
+
+    presented = _presented_secret(request)
+    if presented:
+        if presented.startswith(api_keys.PREFIX):
+            try:
+                return api_keys.verify(presented)
+            except api_keys.InvalidKey:
+                return None
+        # A Cloud Run identity token also arrives as a bearer credential. IAM has
+        # already validated it before the request reaches this process, so it is
+        # only meaningful here when it matches the shared secret.
+        if API_KEY and hmac.compare_digest(presented, API_KEY):
+            return api_keys.legacy_principal()
+
+    if CONSOLE_ACCESS_CODE:
+        cookie = request.cookies.get(CONSOLE_COOKIE, "")
+        if cookie and hmac.compare_digest(cookie, _console_token()):
+            return api_keys.console_principal()
+
+    if not API_KEY and not CONSOLE_ACCESS_CODE:
+        return api_keys.open_principal()
+
+    return None
+
+
+def _authorized(request: Request) -> bool:
+    """Whether the caller is authenticated at all. Retained for compatibility."""
+
+    return _principal(request) is not None
+
+
+def _deny(request: Request, reason: str, status: int, message: str, actor: str = "anonymous", **headers: str):
     telemetry.audit(
         "service.request",
-        actor="anonymous",
+        actor=actor,
         resource=str(request.url.path),
         decision="deny",
         severity="WARN",
-        attributes={"reason": "missing_or_invalid_api_key"},
+        attributes={"reason": reason},
     )
-    return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return JSONResponse({"error": message}, status_code=status, headers=headers or None)
 
 
-async def index(request: Request) -> JSONResponse:
+def _guard(request: Request, scope: str | None = None) -> JSONResponse | None:
+    """Authenticate, authorise, and meter one request.
+
+    Returns a response to send instead of handling the request, or None to
+    proceed. On success the caller is left on `request.state.principal` so
+    handlers can attribute what they do.
+    """
+
+    principal = _principal(request)
+    if principal is None:
+        return _deny(request, "missing_or_invalid_credential", 401, "unauthorized")
+
+    if scope and not principal.has_scope(scope):
+        return _deny(
+            request,
+            "insufficient_scope",
+            403,
+            f"This key lacks the {scope} scope.",
+            actor=principal.actor,
+        )
+
+    wait = REQUEST_LIMITER.check(principal.key_id, principal.requests_per_hour)
+    if wait:
+        return _deny(
+            request,
+            "rate_limited",
+            429,
+            f"Request budget exhausted. Try again in {wait} seconds.",
+            actor=principal.actor,
+            **{"retry-after": str(wait)},
+        )
+
+    request.state.principal = principal
+    return None
+
+
+def _caller(request: Request) -> api_keys.Principal:
+    """The principal established by `_guard`."""
+
+    return getattr(request.state, "principal", None) or api_keys.open_principal()
+
+
+async def root(request: Request):
+    """The console for people, the API index for machines.
+
+    A browser asks for text/html and gets the single-page console; curl and every
+    other client keeps the documented JSON index at exactly the same URL.
+    """
+
+    if "text/html" in request.headers.get("accept", ""):
+        return FileResponse(WEB_ROOT / "index.html")
+    return await api_index(request)
+
+
+async def api_docs(request: Request):
+    """The rendered API reference. Ungated: a contract nobody can read is not one."""
+
+    return FileResponse(WEB_ROOT / "docs.html")
+
+
+async def openapi_spec(request: Request) -> JSONResponse:
+    """The machine-readable contract, pinned to whatever URL served it.
+
+    Pinning matters: the reference's playground sends real requests, and a
+    hardcoded server URL would point a reader's experiments at the wrong fleet.
+    """
+
+    import openapi
+
+    origin = os.getenv("FLEET_PUBLIC_URL", "").strip()
+    if not origin:
+        forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+        host = request.headers.get("host", "")
+        origin = f"{forwarded_proto}://{host}" if host else ""
+    return JSONResponse(openapi.build_spec(origin))
+
+
+async def whoami(request: Request) -> JSONResponse:
+    """What the presented credential is and what it grants.
+
+    Anything holding a key needs a way to answer "what am I allowed to do"
+    without discovering it through a sequence of 403s.
+    """
+
+    principal = _principal(request)
+    if principal is None:
+        return JSONResponse({"authenticated": False}, status_code=401)
+    return JSONResponse(
+        {
+            "authenticated": True,
+            **principal.describe(),
+            "requests_used_this_hour": REQUEST_LIMITER.used(principal.key_id),
+            "audits_used_this_hour": AUDIT_LIMITER.used(principal.key_id),
+        }
+    )
+
+
+async def console_session(request: Request) -> JSONResponse:
+    """Exchange the shared access code for a session cookie.
+
+    Unauthenticated by necessity: this is the endpoint that grants access. It is
+    the only one, and it hands back nothing but a cookie.
+    """
+
+    if request.method == "GET":
+        return JSONResponse(
+            {
+                "locked": bool(CONSOLE_ACCESS_CODE or API_KEY),
+                "authenticated": _authorized(request),
+            }
+        )
+
+    if not CONSOLE_ACCESS_CODE:
+        return JSONResponse({"error": "console sign-in is not configured"}, status_code=404)
+
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+    caller = security.client_fingerprint(request)
+    wait = SIGNIN_THROTTLE.retry_after(caller)
+    if wait:
+        telemetry.audit(
+            "console.signin",
+            actor=caller,
+            resource="console://session",
+            decision="deny",
+            severity="WARN",
+            attributes={"reason": "rate_limited", "retry_after_seconds": wait},
+        )
+        return JSONResponse(
+            {"error": f"Too many sign-in attempts. Try again in {wait} seconds."},
+            status_code=429,
+            headers={"retry-after": str(wait)},
+        )
+
+    supplied = str(payload.get("code", ""))
+    if not hmac.compare_digest(supplied, CONSOLE_ACCESS_CODE):
+        SIGNIN_THROTTLE.record_failure(caller)
+        telemetry.audit(
+            "console.signin",
+            actor=caller,
+            resource="console://session",
+            decision="deny",
+            severity="WARN",
+            attributes={"reason": "bad_access_code"},
+        )
+        return JSONResponse({"error": "access code not recognised"}, status_code=401)
+
+    SIGNIN_THROTTLE.record_success(caller)
+    telemetry.audit(
+        "console.signin",
+        actor="console",
+        resource="console://session",
+        decision="allow",
+    )
+    response = JSONResponse({"authenticated": True})
+    response.set_cookie(
+        CONSOLE_COOKIE,
+        _console_token(),
+        max_age=12 * 60 * 60,
+        httponly=True,
+        samesite="strict",
+        # Behind Cloud Run's TLS termination the request looks like plain HTTP,
+        # so the forwarded header decides this rather than request.url.scheme.
+        secure=security.is_secure_request(request),
+        path="/",
+    )
+    return response
+
+
+async def api_index(request: Request) -> JSONResponse:
     """Service index. Safe to expose: it describes the API, never the data."""
 
     agents = agent_registry.list_agents()
@@ -95,6 +328,10 @@ async def index(request: Request) -> JSONResponse:
             "agents_registered": len(agents),
             "agents": [f"{card['agent_id']}@{card['version']}" for card in agents],
             "endpoints": {
+                "GET /": "the operator console (HTML) or this index (JSON)",
+                "GET /api/whoami": "what the presented credential grants",
+                "GET /docs": "API reference and playground",
+                "GET /openapi.json": "the OpenAPI 3.1 contract",
                 "GET /healthz": "liveness probe",
                 "GET /readyz": "readiness and dependency status",
                 "GET /fleet": "agent cards, identities, tool policies, runtime stats",
@@ -139,7 +376,7 @@ async def readyz(request: Request) -> JSONResponse:
 async def search_companies(request: Request) -> JSONResponse:
     """Resolve a company by name. Routed through the gateway like any other tool."""
 
-    if (denied := _guard(request)) is not None:
+    if (denied := _guard(request, api_keys.SCOPE_AUDITS_READ)) is not None:
         return denied
     query = request.query_params.get("q", "")
     limit = int(request.query_params.get("limit", "10"))
@@ -152,7 +389,7 @@ async def search_companies(request: Request) -> JSONResponse:
 
 
 async def fleet(request: Request) -> JSONResponse:
-    if (denied := _guard(request)) is not None:
+    if (denied := _guard(request, api_keys.SCOPE_AUDITS_READ)) is not None:
         return denied
     return JSONResponse(
         {
@@ -179,7 +416,7 @@ async def upload_data_room(request: Request) -> JSONResponse:
     endpoint only stores them; Model Armor screens the contents at ingestion.
     """
 
-    if (denied := _guard(request)) is not None:
+    if (denied := _guard(request, api_keys.SCOPE_AUDITS_WRITE)) is not None:
         return denied
     try:
         payload = await request.json()
@@ -242,7 +479,7 @@ async def upload_data_room(request: Request) -> JSONResponse:
 
 
 async def submit(request: Request) -> JSONResponse:
-    if (denied := _guard(request)) is not None:
+    if (denied := _guard(request, api_keys.SCOPE_AUDITS_WRITE)) is not None:
         return denied
     try:
         payload: dict[str, Any] = await request.json()
@@ -254,26 +491,86 @@ async def submit(request: Request) -> JSONResponse:
     except Exception as exc:
         return JSONResponse({"error": f"invalid crn: {exc}"}, status_code=400)
 
+    caller = _caller(request)
+    wait = AUDIT_LIMITER.check(caller.key_id, caller.audits_per_hour)
+    if wait:
+        return _deny(
+            request,
+            "audit_budget_exhausted",
+            429,
+            f"This caller's audit budget is spent. Try again in {wait} seconds.",
+            actor=caller.actor,
+            **{"retry-after": str(wait)},
+        )
+
+    stats = runtime.fleet_stats()
+    counts = stats.get("counts", {}) if isinstance(stats, dict) else {}
+    pending = int(counts.get(runtime.STATUS_QUEUED, 0)) + int(counts.get(runtime.STATUS_RUNNING, 0))
+    if pending >= MAX_PENDING_JOBS:
+        telemetry.audit(
+            "job.submit",
+            actor=str(payload.get("submitted_by", "api")),
+            resource=f"company://{query.crn}",
+            decision="deny",
+            severity="WARN",
+            attributes={"reason": "pending_job_limit", "pending": pending},
+        )
+        return JSONResponse(
+            {"error": f"{pending} audits are already queued or running; try again shortly."},
+            status_code=429,
+            headers={"retry-after": "60"},
+        )
+
     # Documents are optional. Absent a path, the audit runs on statutory records
     # and filed accounts alone rather than scanning the server's working directory.
     job_id = runtime.submit_job(
         query.crn,
         data_room_path=str(payload.get("data_room_path", "") or ""),
-        submitted_by=str(payload.get("submitted_by", "api")),
+        submitted_by=f'{caller.actor}/{payload.get("submitted_by", "api")}',
     )
     return JSONResponse({"job_id": job_id, "crn": query.crn, "status": runtime.STATUS_QUEUED}, status_code=202)
 
 
 async def jobs(request: Request) -> JSONResponse:
-    if (denied := _guard(request)) is not None:
+    if (denied := _guard(request, api_keys.SCOPE_AUDITS_READ)) is not None:
         return denied
-    limit = int(request.query_params.get("limit", "25"))
-    crn = request.query_params.get("crn")
-    return JSONResponse({"jobs": runtime.list_jobs(limit=limit, crn=crn)})
+    params = request.query_params
+    # Capped: a page is for reading, and an uncapped one is a way to make the
+    # service do unbounded work on request.
+    limit = max(1, min(int(params.get("limit", "25")), MAX_PAGE_SIZE))
+    offset = max(0, int(params.get("offset", "0")))
+    crn = params.get("crn")
+    status = params.get("status")
+    query = params.get("q")
+    if status and status.upper() not in runtime.ALL_STATUSES:
+        return JSONResponse(
+            {"error": f"unknown status; expected one of {', '.join(sorted(runtime.ALL_STATUSES))}"},
+            status_code=400,
+        )
+
+    # Defaults to true so the published contract keeps its meaning; list views
+    # should pass false and fetch a full report only when one is opened.
+    include_result = params.get("include_result", "true").lower() not in {"false", "0", "no"}
+
+    return JSONResponse(
+        {
+            "jobs": runtime.list_jobs(
+                limit=limit,
+                crn=crn,
+                status=status,
+                offset=offset,
+                include_result=include_result,
+                query=query,
+            ),
+            "total": runtime.count_jobs(crn=crn, status=status, query=query),
+            "limit": limit,
+            "offset": offset,
+        }
+    )
 
 
 async def job_detail(request: Request) -> JSONResponse:
-    if (denied := _guard(request)) is not None:
+    if (denied := _guard(request, api_keys.SCOPE_AUDITS_READ)) is not None:
         return denied
     job = runtime.get_job(request.path_params["job_id"])
     if job is None:
@@ -284,7 +581,7 @@ async def job_detail(request: Request) -> JSONResponse:
 async def job_report_pdf(request: Request):
     """Download a finished audit as a PDF."""
 
-    if (denied := _guard(request)) is not None:
+    if (denied := _guard(request, api_keys.SCOPE_AUDITS_READ)) is not None:
         return denied
     job = runtime.get_job(request.path_params["job_id"])
     if job is None:
@@ -307,7 +604,7 @@ async def job_report_pdf(request: Request):
 
 
 async def job_cancel(request: Request) -> JSONResponse:
-    if (denied := _guard(request)) is not None:
+    if (denied := _guard(request, api_keys.SCOPE_AUDITS_WRITE)) is not None:
         return denied
     try:
         return JSONResponse(runtime.cancel_job(request.path_params["job_id"]))
@@ -316,14 +613,14 @@ async def job_cancel(request: Request) -> JSONResponse:
 
 
 async def memory_view(request: Request) -> JSONResponse:
-    if (denied := _guard(request)) is not None:
+    if (denied := _guard(request, api_keys.SCOPE_AUDITS_READ)) is not None:
         return denied
     crn = request.path_params["crn"]
     return JSONResponse(memory_bank.recall(crn, actor="api"))
 
 
 async def memory_note(request: Request) -> JSONResponse:
-    if (denied := _guard(request)) is not None:
+    if (denied := _guard(request, api_keys.SCOPE_MEMORY_WRITE)) is not None:
         return denied
     try:
         payload = await request.json()
@@ -341,7 +638,7 @@ async def memory_note(request: Request) -> JSONResponse:
 
 
 async def audit_records(request: Request) -> JSONResponse:
-    if (denied := _guard(request)) is not None:
+    if (denied := _guard(request, api_keys.SCOPE_GOVERNANCE_READ)) is not None:
         return denied
     limit = int(request.query_params.get("limit", "200"))
     trace_id = request.query_params.get("trace_id")
@@ -349,7 +646,7 @@ async def audit_records(request: Request) -> JSONResponse:
 
 
 async def audit_verify(request: Request) -> JSONResponse:
-    if (denied := _guard(request)) is not None:
+    if (denied := _guard(request, api_keys.SCOPE_GOVERNANCE_READ)) is not None:
         return denied
     return JSONResponse(telemetry.verify_audit_chain())
 
@@ -377,8 +674,20 @@ async def lifespan(application: Starlette):
 app = Starlette(
     debug=False,
     lifespan=lifespan,
+    # The vendored API reference is several megabytes uncompressed, and audit
+    # payloads are highly repetitive JSON.
+    middleware=[
+        Middleware(security.SecurityHeadersMiddleware),
+        Middleware(GZipMiddleware, minimum_size=1024),
+    ],
     routes=[
-        Route("/", index),
+        Route("/", root),
+        Route("/api", api_index),
+        Route("/api/session", console_session, methods=["GET", "POST"]),
+        Route("/api/whoami", whoami),
+        Route("/docs", api_docs),
+        Route("/openapi.json", openapi_spec),
+        Mount("/static", StaticFiles(directory=str(WEB_ROOT)), name="static"),
         Route("/healthz", healthz),
         Route("/readyz", readyz),
         Route("/fleet", fleet),

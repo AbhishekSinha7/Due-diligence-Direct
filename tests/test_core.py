@@ -1,4 +1,6 @@
+import inspect
 import os
+import re
 import tempfile
 from pathlib import Path
 import unittest
@@ -142,6 +144,45 @@ class CoreBehaviorTests(unittest.TestCase):
             state["red_flag_verdict"]["recommendation"],
             {"GREEN LIGHT", "PROCEED WITH CAUTION", "RED FLAG DEAL BREAKER"},
         )
+
+
+class DataRoomDefaultTests(unittest.TestCase):
+    """An audit must never ingest documents nobody asked it to read.
+
+    The CLI once defaulted to "data_room", which is the folder uploads land in.
+    A run for one company therefore ingested every document every caller had
+    ever uploaded, for any company.
+    """
+
+    def test_cli_defaults_to_no_documents(self):
+        import orchestrator
+
+        declaration = re.search(
+            r'"--data-room",\s*default="([^"]*)"',
+            inspect.getsource(orchestrator),
+        )
+        self.assertIsNotNone(declaration, "could not find the --data-room argument")
+        self.assertEqual(
+            declaration.group(1),
+            "",
+            "the CLI must not default to a folder holding other callers' uploads",
+        )
+
+    def test_an_empty_path_reads_nothing(self):
+        import data_room_loader
+
+        result = data_room_loader.load_data_room("")
+        self.assertEqual(result.get("documents", []), [])
+        self.assertNotEqual(result.get("status"), "success")
+
+    def test_a_named_folder_still_loads(self):
+        import data_room_loader
+
+        result = data_room_loader.load_data_room("fixtures/deal_documents")
+        names = [doc.get("file_name") for doc in result.get("documents", [])]
+        self.assertIn("contract_summary.txt", names)
+        # The folder's own README explains the fixture; it is not deal material.
+        self.assertNotIn("README.md", names)
 
 
 if __name__ == "__main__":
