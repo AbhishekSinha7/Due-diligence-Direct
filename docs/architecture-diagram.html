@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>DueDiligence Direct - Architecture</title>
 <style>
-  @page { size: A4 landscape; margin: 10mm; }
+  @page { size: A4 landscape; margin: 8mm; }
   html, body { margin:0; background:#fff; }
   body {
     font-family: "Segoe UI", -apple-system, Helvetica, Arial, sans-serif;
@@ -12,6 +12,18 @@
     -webkit-font-smoothing: antialiased;
   }
   .sheet { width: 1130px; margin: 0 auto; padding: 20px 24px 24px; }
+  /* One diagram, one sheet. A4 landscape at 8mm margins leaves about 1060x740px,
+     so print narrows the sheet and lets the SVG scale to its viewBox rather than
+     running a stray line onto a second page. Transforms break Chrome's
+     pagination, so this resizes instead of scaling. */
+  @media print {
+    .sheet { width: 950px; padding: 4px 10px 8px; }
+    .sheet svg { width: 100%; height: auto; }
+    header { padding-bottom: 6px; margin-bottom: 8px; }
+    footer { margin-top: 6px; padding-top: 6px; font-size: 8.5px; line-height: 1.4;
+             break-inside: avoid; page-break-inside: avoid; max-width: none; }
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
   header { border-bottom: 1px solid #d4d4d8; padding-bottom: 10px; margin-bottom: 16px; }
   h1 { font-size: 17px; font-weight: 600; margin: 0 0 4px; letter-spacing: -0.01em; }
   .sub { font-size: 10.5px; color:#71717a; }
@@ -50,7 +62,7 @@
   <rect x="8" y="10" width="196" height="152" rx="3" fill="#fafafa" stroke="#e4e4e7"/>
   <text x="20" y="29" font-size="9" font-weight="600" fill="#71717a" letter-spacing="1.1">CLIENTS</text>
   <rect x="20" y="40" width="172" height="30" rx="2" fill="#fff" stroke="#d4d4d8"/>
-  <text x="31" y="59" font-size="10.5" fill="#18181b">Fleet console (Streamlit)</text>
+  <text x="31" y="59" font-size="10.5" fill="#18181b">Operator console (web)</text>
   <rect x="20" y="76" width="172" height="30" rx="2" fill="#fff" stroke="#d4d4d8"/>
   <text x="31" y="95" font-size="10.5" fill="#18181b">Command line</text>
   <rect x="20" y="112" width="172" height="30" rx="2" fill="#fff" stroke="#d4d4d8"/>

@@ -1,0 +1,4 @@
+contract_ref,counterparty,start_date,end_date,change_of_control,termination_notice_days,liability_cap,notes
+MSA-2023-0041,Northgate Retail Group plc,2023-04-01,2026-03-31,customer_may_terminate,30,none_supplier_uncapped,auto-renews 12 months; customer may terminate for convenience
+SUP-2024-0112,Bramwell Distribution Ltd,2024-01-15,2027-12-31,buyer_may_terminate,30,none_seller_uncapped,exclusive supply; two year restraint after termination
+SVC-2022-0088,Halliday Facilities Ltd,2022-06-01,2025-05-31,consent_required,90,12_months_charges,balanced terms; renewal under negotiation

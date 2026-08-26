@@ -1,0 +1,76 @@
+SYNTHETIC EXAMPLE - NOT A REAL AGREEMENT, NOT ATTRIBUTABLE TO ANY COMPANY
+
+MASTER SERVICES AGREEMENT (EXTRACT)
+Between the Target ("Supplier") and Northgate Retail Group plc ("Customer")
+Contract reference MSA-2023-0041. Extract prepared for the data room.
+
+This is a deliberately one-sided customer agreement, used to exercise contract
+review on terms that are commercially adverse to the seller. It carries no
+instructions to the reader and is not an injection fixture; for that, see
+fixtures/deal_documents_tampered.
+
+1. TERM AND RENEWAL
+   1.1 The initial term is thirty-six (36) months from the Effective Date.
+   1.2 On expiry the agreement shall automatically renew for successive twelve
+       (12) month periods unless the Customer gives ninety (90) days notice. The
+       Supplier has no corresponding right not to renew.
+
+2. TERMINATION
+   2.1 The Customer may terminate this agreement in whole or in part by
+       termination for convenience on thirty (30) days written notice, without
+       liability and without payment of any termination sum.
+   2.2 The Supplier may terminate only for the Customer's material breach
+       remaining unremedied after ninety (90) days.
+   2.3 Change of control: the Customer may terminate immediately on any change
+       of control of the Supplier, including any transfer of more than 25% of
+       the Supplier's issued share capital, whether or not the Customer's
+       interests are prejudiced by that change.
+
+3. ASSIGNMENT
+   3.1 The Supplier shall not assign, novate, subcontract or otherwise transfer
+       this agreement or any part of it without prior written consent of the
+       Customer, such consent to be granted or withheld at the Customer's
+       absolute discretion.
+   3.2 The Customer may assign freely to any member of its group.
+
+4. INDEMNITY AND LIABILITY
+   4.1 The Supplier shall indemnify, defend and hold harmless the Customer, its
+       group companies, officers and agents against all losses, damages, costs
+       and expenses of any nature arising out of or in connection with the
+       services, and such indemnity shall be an uncapped indemnity not subject
+       to any financial limit or aggregate cap.
+   4.2 The Supplier accepts unlimited liability for breach of confidentiality,
+       breach of data protection obligations, and any infringement of third
+       party intellectual property rights.
+   4.3 The Customer's aggregate liability to the Supplier under this agreement
+       shall not exceed the charges paid in the three (3) months preceding the
+       claim.
+
+5. SERVICE CREDITS AND LIQUIDATED DAMAGES
+   5.1 Failure to meet the availability target in any month entitles the
+       Customer to liquidated damages of 5% of the annual charges per incident,
+       which the parties agree is a genuine pre-estimate of loss.
+   5.2 Service credits are not the Customer's exclusive remedy and are without
+       prejudice to any other right, including the indemnity at clause 4.1.
+
+6. EXCLUSIVITY AND RESTRAINT
+   6.1 The Supplier grants the Customer exclusivity in the United Kingdom
+       retail grocery sector for the term and for twelve (12) months following
+       expiry.
+   6.2 The Supplier accepts a non-compete covenant preventing it from providing
+       equivalent services to any of the twenty (20) entities listed in
+       Schedule 4 for the same period.
+
+7. PRICING
+   7.1 Charges are fixed for the initial term and thereafter increase by no more
+       than CPI, save that the Customer may require an annual efficiency
+       reduction of 3% to the then-current charges.
+
+8. AUDIT
+   8.1 The Customer may audit the Supplier's books, records and premises on
+       five (5) business days notice, up to four times per year, at the
+       Supplier's cost where any material discrepancy is identified.
+
+9. GOVERNING LAW AND JURISDICTION
+   9.1 This agreement is governed by the laws of England and Wales and the
+       parties submit to the exclusive jurisdiction of the English courts.

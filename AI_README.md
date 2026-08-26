@@ -169,6 +169,23 @@ Rules:
   real budget. They bound accidental runaway and casual abuse, not a determined
   attacker.
 
+## Deployment Constraints
+
+- **The build runs the suite before it pushes an image.** Pushes deploy
+  automatically, so without that gate a broken commit reaches the running service.
+  Keep the `test` step first in `cloudbuild.yaml`.
+- **`_MAX_INSTANCES` is 1, and that is a constraint, not a default.** Jobs, the
+  memory bank and the audit chain are SQLite on the container's own disk. A second
+  instance keeps a second, separate store: `GET /jobs/{id}` would 404 for a job
+  that exists, and the audit chain would fork into two chains that each verify.
+  Raising it requires shared state (Firestore or Cloud SQL) first.
+- **That same disk is ephemeral.** Every deploy starts an empty job store, memory
+  bank and audit chain. Fine for a demo, wrong for a service that claims a
+  tamper-evident trail — the trail cannot outlive the container that wrote it.
+  This is the largest architectural gap in the project.
+- `FLEET_SIGNING_KEY` comes from Secret Manager in the pipeline, so issued API keys
+  survive redeploys. If that secret is ever rotated, every outstanding key dies.
+
 ## HTTP Security (`security.py`)
 
 Cloud Run IAM is the primary access control. These are the defences that survive
@@ -254,6 +271,41 @@ Rules:
   interactively, a row in the `docs/CLIENT.md` table, and a test.
 - `ddclient` is the only client. `fleet_client.py` used to duplicate its transport
   for the Streamlit console; both were deleted once `web/` replaced that console.
+
+## Charts (`web/charts.js`)
+
+Three figures, hand-drawn as inline SVG. No chart library: the page runs under
+`script-src 'self'`, and a vendored plotting library would outweigh the console.
+
+- **Stage timeline** — each stage from its first event to its last. This is what
+  makes the fleet's concurrency visible: the legal and financial agents occupy the
+  same seconds. One hue; row labels carry identity, so no colour encoding is needed.
+- **Reconciliation dumbbell** — expected against filed, per balance-sheet identity.
+  Two series, so two hues (`#1d70b8` / `#d4351c`), a legend, and direct labels on
+  the failing rows only.
+- **Net assets** — a stat tile, deliberately not a chart. Two periods and a change
+  are one number and a delta; a two-bar chart would be decoration.
+- **Board over time** (Company) — an interval per officer, appointment to resignation.
+  Emphasis, not categorical: serving officers carry the accent, past officers recede.
+  A date carrying more than one board change is ruled and labelled, because
+  simultaneous appointments and resignations are what a change of control looks like.
+- **Filing cadence** (Company) — filings as events on a time axis, with the widest
+  gap banded when it exceeds 15 months. Rhythm and its absence are the signal.
+- **Tokens per model call** (Governance) — magnitude across a few calls, so bars in
+  one hue and no legend. The prompt/output split stays in the table beneath.
+
+Rules:
+
+- **Run the palette validator before shipping a new colour pairing.** GOV.UK's red
+  and orange fail the normal-vision floor when adjacent (ΔE 14.2, below 15), which
+  is why severity counts stayed a KPI row instead of becoming a stacked bar. Every
+  darker orange scores worse, not better.
+- Every value in a figure is also in a table beneath it, so a tooltip never gates a
+  number. Markers carry a transparent 12px hit circle, since a 5px dot is not a
+  pointer target.
+- No `tabular-nums` on the large stat-tile figure; it makes display numerals loose.
+- Charts degrade to nothing: each returns `''` when the data cannot support it, and
+  `app.js` guards on `window.charts`, so a missing script never breaks a report.
 
 ## Console (primary UI)
 
@@ -505,6 +557,64 @@ python -c "import json, mcp_server; print(json.dumps(mcp_server.analyze_statutor
 - Record the 4-minute demo video showing the backend running on Cloud Run.
 
 ## Change Log
+
+### 2026-08-25 (contract finding priority)
+
+- **Bug:** `_data_room_findings` capped at 8 by insertion order, and semantic matches
+  are inserted in similarity order. On the adverse fixture a LOW auto-renewal matched
+  at 0.837 displaced a MEDIUM change of control matched at 0.753 — the report kept the
+  more textually similar clause rather than the more serious one. Findings are now
+  sorted by severity before the cap; the sort is stable, so similarity order survives
+  within a severity. Covered by `ContractFindingPriorityTests`.
+- Added `fixtures/deal_documents_adverse/`: one contract hitting all ten literal
+  detectors, one saying the same things in words none of them match. The embedding
+  pass recognises six clauses in the second, weakest at 0.711.
+
+### 2026-08-25 (submission assets)
+
+- Exported `docs/architecture-diagram.pdf` (one A4 landscape page) and
+  `docs/architecture-diagram.png` (1200x780) with headless Chrome. The print CSS now
+  narrows the sheet and lets the SVG scale to its viewBox; a `transform: scale`
+  approach was tried first and broke Chrome's pagination entirely.
+- Corrected a stale label in the diagram: it still said "Fleet console (Streamlit)"
+  after that console was deleted.
+- Added `docs/DEVPOST.md`: paste-ready copy for every submission field, with the two
+  items only the operator can fill marked, and every factual claim verified against
+  the repository before being written down.
+- **Unresolved:** the diagram says region europe-west1, `cloudbuild.yaml` defaults to
+  europe-west2. Only the operator knows which is deployed.
+
+### 2026-08-25 (deploy gate)
+
+- `cloudbuild.yaml` runs the 183 tests before building an image. It previously went
+  build -> push -> deploy with nothing checking the code, while pushes auto-deploy.
+- `--max-instances` dropped from 10 to 1 and given a substitution. Per-instance
+  SQLite means a second instance is a second job store, a second memory bank and a
+  forked audit chain; the old setting invited a job to 404 on the instance that did
+  not run it.
+
+### 2026-08-25 (figures per section)
+
+- Added `boardTenure`, `filingCadence` and `tokensPerCall` to `web/charts.js`, wired
+  into the Company and Governance tabs.
+- On the live NE LTD record the board figure earns itself: it rules and labels
+  2025-05-03, where a secretary resigned and a corporate director named after a
+  company-brokerage website was appointed the same day.
+- Every figure returns `''` when the data cannot carry it — verified for empty lists,
+  a single officer, and officers with no appointment dates — so a thin record shows
+  a table rather than a broken frame.
+- Prompt-versus-output stayed out of the token chart: two shades of one blue fail the
+  chroma floor, and the honest reading is that they are a sequential ramp, not two
+  identities. Total tokens per call in one hue says the same thing without the risk.
+
+### 2026-08-25 (figures in the console)
+
+- Added `web/charts.js`: stage timeline, reconciliation dumbbell, net-assets stat
+  tile. Rendered against a real saved audit and checked for geometry overflow, not
+  just syntax.
+- The colour work changed two decisions: severity counts stayed a KPI row because
+  GOV.UK red and orange are indistinguishable when adjacent, and net assets became a
+  stat tile rather than a two-bar chart.
 
 ### 2026-08-24 (fixtures renamed)
 

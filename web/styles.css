@@ -264,12 +264,21 @@ main { display: block; padding: 20px 0 60px; }
 
 /* ---------- progress ---------- */
 .gv-steps { list-style: none; margin: 0 0 25px; padding: 0; border-top: 1px solid var(--grey-border); }
+/* A grid, not flex: with flex the stage column takes its content's width, so the
+   message started at a different x on every row. Fixed tracks line all three up. */
 .gv-steps li {
-  display: flex; align-items: baseline; gap: 12px;
+  display: grid; grid-template-columns: 4.25rem 10rem 1fr;
+  align-items: baseline; gap: 0 16px;
   padding: 10px 0; border-bottom: 1px solid var(--grey-border);
 }
-.gv-steps__name { font-weight: 700; font-size: 0.95rem; flex: 1 1 auto; }
+.gv-steps__name { font-weight: 700; font-size: 0.95rem; }
 .gv-steps__time { color: var(--grey-text); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.gv-steps__message { color: var(--grey-text); font-size: 0.85rem; }
+@media (max-width: 640px) {
+  /* Too narrow for three tracks; the message wraps beneath its stage name. */
+  .gv-steps li { grid-template-columns: 4.25rem 1fr; row-gap: 4px; }
+  .gv-steps__message { grid-column: 2 / -1; }
+}
 .gv-spinner {
   display: inline-block; width: 16px; height: 16px; vertical-align: -2px;
   border: 3px solid var(--grey-border); border-top-color: var(--blue); border-radius: 50%;
@@ -302,6 +311,19 @@ main { display: block; padding: 20px 0 60px; }
   padding: 6px 0; border-bottom: 1px solid var(--grey-border);
 }
 .gv-filelist button { background: none; border: 0; color: var(--red); cursor: pointer; font: inherit; text-decoration: underline; }
+
+/* ---------- figures ---------- */
+.gv-figure { margin: 0 0 30px; }
+.gv-figure__caption {
+  font-weight: 700; font-size: 1.05rem; margin-bottom: 10px; color: var(--black);
+}
+.gv-figure__note { color: var(--grey-text); font-size: 0.82rem; margin: 8px 0 0; max-width: 60ch; }
+.gv-figure svg { display: block; overflow: visible; }
+.gv-figure--tile { background: var(--grey-bg); padding: 16px 20px; }
+.gv-figure__value { font-size: 2.4rem; font-weight: 700; line-height: 1.1; }
+.gv-figure__delta { font-size: 0.95rem; font-weight: 700; margin-top: 4px; }
+.gv-legend { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 0.82rem; color: var(--grey-text); margin-bottom: 10px; }
+.gv-legend i { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: 0; }
 
 /* ---------- misc ---------- */
 .gv-muted { color: var(--grey-text); }
