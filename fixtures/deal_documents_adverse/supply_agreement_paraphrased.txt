@@ -1,0 +1,53 @@
+SYNTHETIC EXAMPLE - NOT A REAL AGREEMENT, NOT ATTRIBUTABLE TO ANY COMPANY
+
+SUPPLY AGREEMENT (EXTRACT)
+Between the Target ("Seller") and Bramwell Distribution Ltd ("Buyer")
+Contract reference SUP-2024-0112. Extract prepared for the data room.
+
+Every restriction below is adverse to the Seller, and none of it is written in
+the words a keyword search would look for. This document exists to show the
+difference between matching a phrase and understanding a clause: the literal
+matcher finds nothing here, and the embedding pass should still recognise what
+these terms are.
+
+1. DURATION
+   1.1 This agreement runs to 31 December 2027 and thereafter continues for
+       further periods of one year at a time, ending only if either party
+       serves notice six months before an anniversary.
+
+2. ENDING THE AGREEMENT
+   2.1 The Buyer may bring this agreement to an end at any time, for any reason
+       or for no reason, by giving one month's notice in writing. No payment
+       falls due to the Seller as a result.
+   2.2 If the persons who ultimately own or control the Seller cease to do so,
+       or if a third party acquires the ability to direct the Seller's affairs,
+       the Buyer may end this agreement with immediate effect.
+
+3. TRANSFER
+   3.1 The Seller may not pass the benefit or burden of this agreement to any
+       other person, nor engage anyone else to perform it, unless the Buyer has
+       first agreed in writing. The Buyer is under no obligation to agree.
+
+4. MAKING GOOD LOSSES
+   4.1 The Seller shall make good every loss, claim, cost and expense the Buyer
+       suffers in connection with the goods, without limit as to amount and
+       without regard to any cap stated elsewhere in this agreement.
+   4.2 No financial ceiling applies to the Seller's obligations under clause 4.1
+       in respect of confidentiality, data protection or third party rights.
+
+5. DEALING WITH OTHERS
+   5.1 During the term the Seller shall not supply goods of the same or similar
+       description to any other buyer in the United Kingdom.
+   5.2 For two years after this agreement ends, the Seller shall not carry on or
+       be engaged in any business which competes with the Buyer within the same
+       market.
+
+6. FAILURE TO DELIVER
+   6.1 For each week of late delivery the Seller shall pay the Buyer a fixed sum
+       of 2% of the annual contract value, agreed in advance as a fair estimate
+       of the harm caused, recoverable whether or not actual loss is proved.
+
+7. DISPUTES
+   7.1 The courts of Northern Ireland shall have exclusive jurisdiction over any
+       dispute arising under this agreement, and the law applied shall be that
+       of Northern Ireland.

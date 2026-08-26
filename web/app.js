@@ -19,6 +19,7 @@ const state = {
   files: [],
   company: null,
   announced: {},
+  lastEvents: null,
   openTab: 'report',
   history: { offset: 0, limit: 25, query: '', status: '', total: 0 },
 };
@@ -458,7 +459,7 @@ function renderJob(job) {
     <li>
       <span class="gv-steps__time">${esc(clock(event.timestamp))}</span>
       <span class="gv-steps__name">${esc(titleCase(event.stage))}</span>
-      <span class="gv-muted gv-small" style="flex:2 1 50%">${esc(event.message)}</span>
+      <span class="gv-steps__message">${esc(event.message)}</span>
     </li>`).join('')}</ul>`;
 
   if (job.status === 'FAILED') {
@@ -470,6 +471,7 @@ function renderJob(job) {
   }
 
   if (job.status === 'SUCCEEDED' && job.result) {
+    state.lastEvents = events;
     const seconds = elapsedSeconds(job);
     html += renderReport(job.result, seconds);
   } else if (running) {
@@ -633,6 +635,10 @@ function renderReport(result, seconds) {
     <button class="gv-button gv-button--small" type="button" id="download-pdf">Download the Red Flag Report (PDF)</button>
   </div>`;
 
+  if (window.charts && state.lastEvents) {
+    html += charts.runTimeline(state.lastEvents);
+  }
+
   html += tabs([
     { id: 'report', label: 'Report', body: reportTab(verdict, result) },
     { id: 'company', label: 'Company', body: companyTab(result.raw_statutory_data) },
@@ -766,6 +772,8 @@ function companyTab(bundle) {
   const officerItems = officers.items || [];
   html += `<h3>Officers <span class="gv-muted gv-small">(${num(officers.active_count || 0)} active,
     ${num(officers.resigned_count || 0)} resigned)</span></h3>`;
+  // The shape of a board over time says things a table of dates does not.
+  if (window.charts) html += charts.boardTenure(officerItems);
   html += officerItems.length
     ? table('', ['Name', 'Role', 'Status', 'Appointed', 'Resigned', 'Nationality', 'Occupation', 'Born'],
         officerItems.map((item) => [
@@ -818,6 +826,7 @@ function companyTab(bundle) {
   const filingItems = filings.items || [];
   if (filingItems.length) {
     html += `<h3>Recent filings <span class="gv-muted gv-small">(${filingItems.length})</span></h3>`;
+    if (window.charts) html += charts.filingCadence(filingItems);
     html += table('', ['Date', 'Type', 'Category', 'Description'],
       filingItems.map((item) => [
         esc(item.date), esc(item.type), esc(titleCase(item.category)),
@@ -873,6 +882,15 @@ function accountsTab(accounts) {
          <span class="gv-muted gv-small">(${num(latest.document_bytes)} bytes, ${num(latest.pages)} pages)</span>`
       : '-'],
   ]);
+
+  // The picture first, the tables under it: the figures answer "is this sound?",
+  // the tables answer "where exactly did that come from?".
+  if (window.charts) {
+    html += charts.netAssets(periods);
+    const worst = periods.find((p) => (p.reconciliation || []).some((c) => !c.consistent))
+      || periods[periods.length - 1];
+    if (worst) html += charts.reconciliation(worst);
+  }
 
   periods.forEach((period) => {
     const metrics = period.metrics || {};
@@ -1018,6 +1036,8 @@ function governanceTab(governance) {
     <div class="gv-stat"><div class="gv-stat__label">Total tokens</div><div class="gv-stat__value">${num(usage.total_tokens)}</div></div>
     <div class="gv-stat"><div class="gv-stat__label">Model latency</div><div class="gv-stat__value">${num(usage.total_model_latency_ms)}<span class="gv-small">ms</span></div></div>
   </div>`;
+
+  if (byCall.length && window.charts) html += charts.tokensPerCall(byCall);
 
   if (byCall.length) {
     html += table('Every model call in this run', ['#', 'Schema', 'Model', 'Prompt', 'Output', 'Total', 'Latency'],

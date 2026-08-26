@@ -12,10 +12,12 @@ room — so the legal agent and Model Armor have something real to work on.
 | --- | --- | --- |
 | [deal_documents/](deal_documents/) | the Legal Risk Agent's clause detection | a contract summary with a change-of-control consent requirement and an uncapped indemnity |
 | [deal_documents_tampered/](deal_documents_tampered/) | Model Armor | the same kind of document, altered to instruct the agents to report the company as clean |
+| [deal_documents_adverse/](deal_documents_adverse/) | both clause tiers | one contract hitting all ten literal detectors, and one saying the same things in words none of them match |
 
 ```powershell
 python orchestrator.py 03994971 --data-room fixtures/deal_documents
 python orchestrator.py 03994971 --data-room fixtures/deal_documents_tampered
+python orchestrator.py 03994971 --data-room fixtures/deal_documents_adverse
 ```
 
 The second prints `Quarantined 1 document(s)` — and the tampering is reported as a

@@ -19,8 +19,25 @@ substitutions:
   # Background diligence jobs keep running after the HTTP response, so keep one
   # warm instance during a demo. Set to 0 to minimise cost when idle.
   _MIN_INSTANCES: "1"
+  # Jobs, the memory bank and the audit chain live in SQLite on the container's
+  # own disk, so a second instance would keep a second, separate store: a job
+  # submitted to one would 404 on another, and the audit chain would fork.
+  # Raising this needs shared state (Firestore or Cloud SQL) first.
+  _MAX_INSTANCES: "1"
 
 steps:
+  # Pushes deploy automatically, so the suite runs first and a failure stops the
+  # build before an image is pushed. Deploying code that does not pass its own
+  # tests is the failure this exists to prevent.
+  - id: test
+    name: python:3.13-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        pip install --quiet --no-cache-dir -r requirements.txt
+        python -m unittest discover -s tests -t .
+
   - id: build
     name: gcr.io/cloud-builders/docker
     args:
@@ -53,7 +70,7 @@ steps:
       - --memory=2Gi
       - --timeout=900
       - --min-instances=${_MIN_INSTANCES}
-      - --max-instances=10
+      - --max-instances=${_MAX_INSTANCES}
       # CPU stays allocated so background jobs continue after the response.
       - --no-cpu-throttling
       - --set-env-vars=FLEET_ENVIRONMENT=production,FLEET_CLOUD_PLATFORM=gcp_cloud_run,FLEET_CLOUD_TRACE=true,GEMINI_MODEL=gemini-3.5-flash,FLEET_DATA_REGION=${_REGION},FLEET_SERVICE_ACCOUNT=${_SERVICE_ACCOUNT}

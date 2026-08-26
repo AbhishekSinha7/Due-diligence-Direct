@@ -185,5 +185,68 @@ class DataRoomDefaultTests(unittest.TestCase):
         self.assertNotIn("README.md", names)
 
 
+class ContractFindingPriorityTests(unittest.TestCase):
+    """The cap on contract findings must drop the least serious, not the last.
+
+    Semantic matches arrive ordered by similarity, so a LOW clause matched at 0.84
+    used to displace a MEDIUM one matched at 0.75 — and change of control is not
+    something a diligence report should lose to an auto-renewal.
+    """
+
+    def _room(self, clauses):
+        return {
+            "status": "success",
+            "documents": [],
+            "semantic_clauses": {
+                "matches": [
+                    {
+                        "file_name": "contract.txt",
+                        "clause": clause,
+                        "similarity": similarity,
+                        "excerpt": f"...{clause}...",
+                    }
+                    for clause, similarity in clauses
+                ]
+            },
+        }
+
+    def test_a_more_serious_clause_survives_the_cap(self):
+        from orchestrator import _data_room_findings
+
+        # Five LOW clauses matched more strongly than the one MEDIUM.
+        room = self._room([
+            ("Auto-Renewal", 0.90),
+            ("Exclusivity", 0.89),
+            ("Non-Compete", 0.88),
+            ("Liquidated Damages", 0.87),
+            ("Governing Law", 0.86),
+            ("Change of Control", 0.75),
+        ])
+        kept = _data_room_findings(room, limit=3)
+        severities = [finding["severity"] for finding in kept]
+
+        self.assertEqual(len(kept), 3)
+        self.assertIn("MEDIUM", severities, "the MEDIUM clause must not be cut for being less similar")
+        self.assertEqual(severities[0], "MEDIUM", "findings should be ordered most serious first")
+
+    def test_similarity_order_is_kept_within_one_severity(self):
+        from orchestrator import _data_room_findings
+
+        room = self._room([
+            ("Exclusivity", 0.90),
+            ("Non-Compete", 0.80),
+            ("Auto-Renewal", 0.70),
+        ])
+        kept = _data_room_findings(room)
+        clauses = [finding["category"] for finding in kept]
+        self.assertEqual(
+            clauses,
+            [
+                "Contract Term: Exclusivity",
+                "Contract Term: Non-Compete",
+                "Contract Term: Auto-Renewal",
+            ],
+        )
+
 if __name__ == "__main__":
     unittest.main()
