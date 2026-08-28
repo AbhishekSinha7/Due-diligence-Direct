@@ -23,7 +23,8 @@ An autonomous M&A due diligence fleet for the All Things Agentic Hackathon, subm
 **The Fortified Enterprise Fleet** track. It audits UK companies from live Companies House
 statutory data plus a local data room and produces a Red Flag Report with citations.
 
-Track requirements and where each is satisfied are tabulated in `ARCHITECTURE.md`
+Track requirements and where each is satisfied are tabulated in `ARCHITECTURE.md`,
+which is kept locally and deliberately not committed
 section 3. Do not remove a fleet layer without updating that table.
 
 ## Current Architecture
@@ -48,11 +49,15 @@ Auditor} in parallel -> Debate -> Synthesizer.
 | `report_export.py` | Red Flag Report as PDF (reportlab). No network, no external fonts. |
 | `telemetry.py` | OTel spans, exporters, hash-chained audit log and verifier. |
 | `service.py` | Starlette control plane for Cloud Run. |
-| `fleet_client.py` | Backend abstraction: `RemoteBackend` (HTTP control plane) or `LocalBackend` (in-process), selected by `FLEET_API_URL`. |
-| `govuk.py` | GOV.UK Design System styling and components (tags, summary lists, panels, header). |
+| `api_keys.py` | Signed, scoped, expiring per-caller API keys, and the CLI that issues them. |
+| `security.py` | Scheme detection behind the proxy, security headers, sign-in throttle, rate limiters. |
+| `openapi.py` | The hand-written OpenAPI 3.1 contract served at `/openapi.json`. |
+| `web/` | The operator console: `index.html`, `styles.css`, `app.js`, `charts.js`, vendored API reference. |
+| `ddclient/` | The Python client library and its CLI. |
 | `Dockerfile`, `cloudbuild.yaml` | Cloud Run image and Cloud Build deploy pipeline. |
-| `tests/` | 78 unittest cases; `tests/__init__.py` sandboxes all fleet state paths. |
-| `fixtures/deal_documents/`, `fixtures/deal_documents_tampered/` | Clean and poisoned demo fixtures. |
+| `tests/` | 185 unittest cases; `tests/__init__.py` sandboxes all fleet state paths. |
+| `fixtures/` | Contract fixtures: benign, adverse (both clause tiers), and tampered (Model Armor). |
+| `examples/` | Four runnable scripts, from read-only to a full audit. |
 
 ## Financial Data Rules (non-negotiable)
 
@@ -63,8 +68,9 @@ Auditor} in parallel -> Debate -> Synthesizer.
   never to recompute, round, restate, or estimate a computed figure.
 - A data room document must never override a statutory filing figure. The data room is for
   contractual material that has no public filing.
-- Never reintroduce fabricated financial fixtures. `fixtures/deal_documents/financial_snapshot.csv`
-  and `fixtures/deal_documents_tampered/financial_schedule.csv` were deleted for exactly this reason.
+- Never reintroduce fabricated financial fixtures. Two once existed - a financial
+  snapshot and a financial schedule, under what is now `fixtures/` - and both were
+  deleted for exactly this reason. The folders hold contractual material only.
 - Small-company filings are self-tagged and often inconsistent. Ratios are published only
   when `reconcile_period` passes; otherwise emit `filing_internally_inconsistent` and withhold
   the affected ratio. Verified live: CRN 03994971's 2026-02-20 filing tags
@@ -399,7 +405,8 @@ work is deciding what the operator meant and whether a hit is unambiguous.
   places: `state["reasoning_chain"]`, an `agent.exchange` event on the active OTel span,
   and the job event stream (attribute `exchange: True`) so clients can render it live.
 - Kinds: `task_assignment`, `context_recall`, `finding_report`, `challenge`, `rebuttal`,
-  `resolution`, `verdict`. Add new kinds to `dashboard.KIND_LABELS` too.
+  `resolution`, `verdict`. `web/app.js` title-cases them, so a new kind needs no
+  client change.
 - Model metadata (model id, latency, token counts) rides on the exchange attributes, which
   is how the console shows which model answered for each agent.
 - Do not put raw prompts or full model responses on the chain: prompts contain screened but
@@ -463,19 +470,15 @@ work is deciding what the operator meant and whether a hit is unambiguous.
 - Missing model credentials produce deterministic fallback analysis with stated limitations.
 - Generated state lives in `.fleet/` (registry, memory, jobs, checkpoints), `telemetry/`
   (spans, audit log), and `runs/` (JSON artifacts). All are gitignored.
-- The audit chain head is read from the file on each write, so CLI, dashboard, and API
-  processes can append to one verifiable chain.
+- The audit chain head is read from the file on each write, so the CLI and the service
+  can append to one verifiable chain.
 - SQLite connections use the `_db()` context manager in each module; plain `_connect()`
   inside a `with` leaks the connection and raises ResourceWarnings.
-- `get_backend` is `@st.cache_resource` keyed on the client module's mtime. Without that
-  fingerprint, editing `fleet_client.py` leaves a stale cached instance behind and the
-  console fails with AttributeError on any newly added method. Restarting Streamlit also
-  clears it, but the fingerprint means you do not have to remember.
-- `BackendParityTests` asserts both backends implement every `FleetBackend` protocol
-  member; add a method to one and the suite fails until the other has it.
-- The dashboard must go through `fleet_client`, never import `runtime`, `telemetry`,
-  `agent_registry`, `memory_bank`, or `orchestrator` directly. That indirection is what lets
-  one console drive either a local fleet or the deployed Cloud Run control plane.
+- The console is a client of the HTTP API and nothing else. `web/app.js` must never gain
+  knowledge the API does not expose; if it needs something, extend an endpoint.
+- Browsers cache `app.js`, so the console shell and its assets are served `no-cache`.
+  Without it a stale script runs against a newer API and the failure looks like a broken
+  feature rather than a stale asset.
 - There is no data room picker. Documents arrive by upload only, or the audit is
   statutory-only. A blank `data_room_path` must always mean "no documents": both
   `data_room_loader.load_data_room` and the ingestion node guard against it, because
@@ -557,6 +560,39 @@ python -c "import json, mcp_server; print(json.dumps(mcp_server.analyze_statutor
 - Record the 4-minute demo video showing the backend running on Cloud Run.
 
 ## Change Log
+
+### 2026-08-26 (what ships and what does not)
+
+- The previous ignore rules were doing nothing: `ARCHITECTURE.md`, `BLOG_POST.md`,
+  `SOCIAL_POST.md` and `docs/PROMOTION.md` were all listed **and still tracked**, because
+  a `.gitignore` entry never removes a file already in the index. They are now untracked
+  with `git rm --cached`, so the rules match reality. All four remain on disk.
+- Replaced the blanket `docs/*` with named entries. That rule was also hiding
+  `docs/architecture-diagram.png` and `.pdf` — a required submission upload — from ever
+  being added. Both are now tracked.
+- `examples/` and `docs/CLIENT.md` / `docs/INTEGRATION.md` are kept deliberately, with the
+  reason written into `.gitignore` so the next person does not have to guess.
+- Repointed the three README links to `ARCHITECTURE.md`, which would otherwise 404 for
+  anyone reading the repository on GitHub. No shipped document now links to a file that
+  will not be in a clone.
+
+### 2026-08-26 (documentation brought back in line)
+
+- **Regression fixed:** the Streamlit cleanup deleted the client-library and examples
+  sections from `README.md` as collateral — it removed a text range between two markers
+  and those paragraphs sat inside it. Restored, alongside per-caller API keys and
+  `/api/whoami`, which the README had never covered.
+- `README.md` test count was still 49; it is now read from the suite (185) along with a
+  description of what the suite actually covers.
+- `AI_README.md` module table listed `fleet_client.py` and `govuk.py`, both deleted, and
+  omitted `api_keys.py`, `security.py`, `openapi.py`, `web/` and `ddclient/`. Removed the
+  Streamlit caching invariant and the `dashboard.KIND_LABELS` instruction, which describe
+  a console that no longer exists.
+- **Test fragility fixed:** `ReportModelTests` took whichever run in `runs/` was newest,
+  so its reconciliation assertions silently skipped when the most recent audit was of a
+  dormant company. It now selects the newest run that has parsed accounts.
+- Checked every relative link and repository path named in all 16 markdown files: no
+  broken links.
 
 ### 2026-08-25 (contract finding priority)
 

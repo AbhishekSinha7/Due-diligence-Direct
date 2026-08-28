@@ -23,7 +23,7 @@ single call the agents make.
 | **Model Armor** | Seller documents are screened for prompt injection and quarantined; credentials and PII are redacted; every citation is string-matched against the source payload; unverifiable HIGH claims are capped at MEDIUM; the output disclaimer is enforced. |
 | **Telemetry** | OpenTelemetry spans per agent stage plus a hash-chained audit log with a `/audit/verify` endpoint that proves records were not edited. |
 
-Full diagrams and the requirement-by-requirement mapping: [ARCHITECTURE.md](ARCHITECTURE.md).
+Full diagram: [docs/architecture-diagram.png](docs/architecture-diagram.png).
 
 ## Where the financial figures come from
 
@@ -71,7 +71,7 @@ enterprise controls:
   cannot reach Companies House at all.
 - **Tamper-evident.** Hash-chained audit log, verifiable at `/audit/verify`.
 
-Full detail, including what this deliberately does not claim: [ARCHITECTURE.md](ARCHITECTURE.md) section 5.
+What this deliberately does not claim is set out under Limitations, below.
 
 ## The agents
 
@@ -91,7 +91,9 @@ Output is one of `GREEN LIGHT`, `PROCEED WITH CAUTION`, or `RED FLAG DEAL BREAKE
 - **FastMCP** tool server over the Companies House API
 - **Google Cloud**: Cloud Run, Cloud Build, Artifact Registry, Secret Manager, Cloud Trace
 - **Starlette** control plane, serving the API, the console, and its own OpenAPI contract
-- **GOV.UK Design System** console (no framework, no build step, three static files)
+- **GOV.UK Design System** console (no framework, no build step, four static files)
+- **OpenAPI 3.1** contract at `/openapi.json`, rendered at `/docs`
+- **`ddclient`** Python client and CLI, with per-caller signed API keys
 
 ## Setup
 
@@ -137,9 +139,43 @@ curl http://localhost:8080/            # JSON index of every endpoint
 curl http://localhost:8080/api         # the same index, explicitly
 ```
 
-To publish the console, set `FLEET_CONSOLE_ACCESS_CODE`. Humans exchange the code once for
-an HttpOnly session cookie; machines keep using `FLEET_API_KEY` or a Cloud Run identity
-token. With neither variable set the service is open, which is what you want locally.
+To publish the console, set `FLEET_CONSOLE_ACCESS_CODE`. People exchange the code once
+for an HttpOnly session cookie; machines present a key. With neither variable set the
+service is open, which is what you want locally.
+
+Machine callers get their own key rather than sharing one secret:
+
+```powershell
+python api_keys.py issue --name "partner-crm" --scopes audits:read audits:write --days 30
+```
+
+Keys are signed rather than stored, so they survive a redeploy and can be minted
+anywhere the fleet's signing key is available. Each carries scopes, an expiry and hourly
+budgets; `GET /api/whoami` reports what a key grants and how much of its budget is
+spent. The older shared `FLEET_API_KEY` still works but is unattributable and cannot be
+revoked on its own.
+
+Drive it from Python or the shell with the client library
+([docs/CLIENT.md](docs/CLIENT.md)). To wire another system in, including how to obtain
+every credential it needs, see [docs/INTEGRATION.md](docs/INTEGRATION.md):
+
+```python
+from ddclient import DueDiligenceClient
+
+with DueDiligenceClient("https://fleet.example.run.app", api_key="ddd_v1....") as fleet:
+    report = fleet.run("03994971", on_event=print)
+    print(report.recommendation)
+    for check in report.reconciliation_failures:
+        print(f"{check.identity}: expected {check.expected:,.0f}, filed {check.reported:,.0f}")
+```
+
+```powershell
+python -m ddclient audit 03994971 --watch --pdf report.pdf
+python -m ddclient jobs --search formations
+```
+
+Runnable versions are in [examples/](examples/). Start with `read_only.py`: it proves a
+URL, a key and its scopes all work without spending model quota.
 
 CLI, inline:
 
@@ -269,7 +305,7 @@ hash chain and should report `{"valid": true, ...}`.
 ### 7. Deploy to Google Cloud
 
 See [Deploy to Google Cloud](#deploy-to-google-cloud) below, or the step-by-step
-walkthrough with IAM roles and secrets in [ARCHITECTURE.md](ARCHITECTURE.md).
+walkthrough with IAM roles and secrets in [docs/INTEGRATION.md](docs/INTEGRATION.md).
 
 ## Demo script
 
@@ -288,12 +324,15 @@ walkthrough with IAM roles and secrets in [ARCHITECTURE.md](ARCHITECTURE.md).
 python -m unittest discover -s tests -t .
 ```
 
-49 tests, no network required. They cover iXBRL number formats, tag extraction and
-period grouping, ratio and runway mathematics, the accounting-identity gate that suppresses
-unreliable liquidity claims, identity token forgery and expiry, registry versioning and
-lifecycle, gateway denial paths (unregistered tool, undeclared capability, egress, quota,
-retry), Model Armor injection and grounding behaviour, memory deltas, runtime job lifecycle
-including cancellation and failure, and audit-chain verification.
+185 tests, no network required. They cover iXBRL number formats, tag extraction and
+period grouping, ratio mathematics, the accounting-identity gate that suppresses
+unreliable liquidity claims, contract-finding severity ordering, identity token forgery
+and expiry, registry versioning, gateway denial paths (unregistered tool, undeclared
+capability, egress, quota, retry), Model Armor injection and grounding behaviour, API key
+signing, scope enforcement and revocation, the session cookie's flags behind a
+TLS-terminating proxy, security headers and asset caching, memory deltas, job listing and
+pagination, the OpenAPI contract against the actual routes, the client library against a
+real server, and audit-chain verification.
 
 ## Limitations
 
