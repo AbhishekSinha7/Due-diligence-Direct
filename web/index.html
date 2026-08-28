@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Due diligence audit - DueDiligence Direct</title>
+<link rel="stylesheet" href="/static/styles.css">
+<link rel="icon" href="data:,">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<header class="gv-header" role="banner">
+  <div class="gv-header__inner">
+    <span class="gv-header__logo">DueDiligence Direct</span>
+    <span class="gv-header__service">Governed M&amp;A due diligence fleet</span>
+    <span class="gv-header__meta" id="env-meta"></span>
+  </div>
+</header>
+
+<nav class="gv-nav" aria-label="Sections">
+  <div class="gv-nav__inner">
+    <button type="button" data-view="console" aria-current="page">Audit console</button>
+    <button type="button" data-view="history">All audits</button>
+    <button type="button" data-view="registry">Agent registry</button>
+    <button type="button" data-view="audit">Audit trail</button>
+    <button type="button" data-view="memory">Memory bank</button>
+    <a href="/docs" class="gv-nav__link">API reference</a>
+  </div>
+</nav>
+
+<div class="gv-width">
+  <div class="gv-phase">
+    <strong class="gv-phase__tag">Beta</strong>
+    <span>AI-generated diligence support over live Companies House records. Not legal or financial advice &mdash; verify every finding before relying on it.</span>
+  </div>
+</div>
+
+<main id="main-content" class="gv-width" role="main">
+
+  <!-- ============ ACCESS GATE ============ -->
+  <section id="view-locked" hidden>
+    <div class="gv-grid">
+      <div>
+        <h1>Sign in to the console</h1>
+        <p>This console is protected by a shared access code. Ask the fleet operator for the code.</p>
+        <div id="locked-error"></div>
+        <form id="locked-form">
+          <div class="gv-form-group">
+            <label class="gv-label" for="access-code">Access code</label>
+            <span class="gv-hint" id="access-hint">The code is case sensitive.</span>
+            <input class="gv-input" type="password" id="access-code" name="access-code"
+                   autocomplete="current-password" aria-describedby="access-hint">
+          </div>
+          <button class="gv-button" type="submit">Continue</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CONSOLE ============ -->
+  <section id="view-console">
+    <div class="gv-grid">
+      <div id="console-main">
+        <div id="console-placeholder">
+          <h1>Run a due diligence audit</h1>
+          <p>
+            Six governed agents read the statutory register and the company&rsquo;s own filed
+            iXBRL accounts, argue the findings out between themselves, and return a
+            recommendation with the evidence attached.
+          </p>
+          <div class="gv-inset">
+            <p class="gv-small" style="margin:0">
+              Every figure is parsed from documents the company filed at Companies House.
+              Nothing on this page is generated from sample or placeholder data.
+            </p>
+          </div>
+          <div class="gv-actions" style="justify-content:space-between">
+            <h2 style="margin-bottom:0">Recent audits</h2>
+            <button type="button" class="gv-button gv-button--secondary gv-button--small"
+                    data-view="history">View all audits</button>
+          </div>
+          <div id="recent-jobs"><p class="gv-muted">Loading&hellip;</p></div>
+        </div>
+        <div id="console-job" hidden></div>
+      </div>
+
+      <aside id="console-side" aria-label="Start an audit">
+        <div class="gv-card gv-card--grey">
+          <h2 style="margin-top:0;font-size:1.25rem">Start an audit</h2>
+
+          <form id="lookup-form">
+            <div class="gv-form-group" style="margin-bottom:10px">
+              <label class="gv-label" for="company-query">Company name or number</label>
+              <span class="gv-hint" id="company-hint">
+                For example 03994971, or Third Party Formations.
+              </span>
+              <input class="gv-input" type="text" id="company-query"
+                     autocomplete="off" spellcheck="false" aria-describedby="company-hint">
+            </div>
+            <button class="gv-button gv-button--secondary gv-button--small" type="submit"
+                    id="find-company">Find company</button>
+          </form>
+
+          <div id="company-results" aria-live="polite"></div>
+          <div id="selected-company"></div>
+
+          <hr class="gv-section-break">
+
+          <h3 style="margin-top:0;font-size:1.05rem">Deal documents <span class="gv-muted gv-small">(optional)</span></h3>
+          <p class="gv-hint">Contracts, schedules or notes. CSV, MD, PDF or TXT.</p>
+          <div class="gv-drop" id="dropzone" tabindex="0" role="button"
+               aria-label="Choose deal documents or drop them here">
+            Drop files here, or <span style="text-decoration:underline;color:#1d70b8">choose files</span>
+          </div>
+          <input type="file" id="file-input" multiple class="gv-sr"
+                 accept=".csv,.md,.pdf,.txt">
+          <ul class="gv-filelist" id="file-list"></ul>
+
+          <hr class="gv-section-break">
+
+          <div id="submit-error"></div>
+          <button class="gv-button" type="button" id="submit-audit" disabled
+                  title="Find a company first">Start audit</button>
+          <p class="gv-small gv-muted" id="backend-meta"></p>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ============ AUDIT HISTORY ============ -->
+  <section id="view-history" hidden>
+    <h1>All audits</h1>
+    <p>Every audit this fleet has run, newest first. Open one to read its full report.</p>
+
+    <div id="history-stats"></div>
+
+    <form id="history-filters" class="gv-card gv-card--grey">
+      <div class="gv-two" style="gap:0 20px">
+        <div class="gv-form-group" style="margin-bottom:10px">
+          <label class="gv-label" for="history-query">Company name or number</label>
+          <input class="gv-input" type="text" id="history-query"
+                 autocomplete="off" placeholder="Any company">
+        </div>
+        <div class="gv-form-group" style="margin-bottom:10px">
+          <label class="gv-label" for="history-status">Status</label>
+          <select class="gv-select" id="history-status">
+            <option value="">Any status</option>
+            <option value="SUCCEEDED">Succeeded</option>
+            <option value="RUNNING">Running</option>
+            <option value="QUEUED">Queued</option>
+            <option value="FAILED">Failed</option>
+            <option value="CANCELLED">Cancelled</option>
+            <option value="INTERRUPTED">Interrupted</option>
+          </select>
+        </div>
+      </div>
+      <div class="gv-actions">
+        <button class="gv-button gv-button--small" type="submit">Apply filters</button>
+        <button class="gv-button gv-button--secondary gv-button--small" type="button"
+                id="history-clear">Clear</button>
+      </div>
+    </form>
+
+    <div id="history-body"><p class="gv-muted">Loading&hellip;</p></div>
+    <div class="gv-actions" id="history-pager" style="justify-content:space-between"></div>
+  </section>
+
+  <!-- ============ REGISTRY ============ -->
+  <section id="view-registry" hidden>
+    <h1>Agent registry</h1>
+    <p>Every agent publishes a card: who it is, what version, which tools it may call, and what it is forbidden from doing.</p>
+    <div id="registry-body"><p class="gv-muted">Loading&hellip;</p></div>
+  </section>
+
+  <!-- ============ AUDIT TRAIL ============ -->
+  <section id="view-audit" hidden>
+    <h1>Audit trail</h1>
+    <p>Every tool call, policy decision and model exchange, hash-chained so tampering is detectable.</p>
+    <div class="gv-actions" style="margin-bottom:20px">
+      <button class="gv-button gv-button--secondary gv-button--small" type="button" id="verify-chain">Verify hash chain</button>
+      <span id="chain-result"></span>
+    </div>
+    <div id="audit-body"><p class="gv-muted">Loading&hellip;</p></div>
+  </section>
+
+  <!-- ============ MEMORY ============ -->
+  <section id="view-memory" hidden>
+    <h1>Memory bank</h1>
+    <p>What the fleet remembers about a company between audits, and what changed since it last looked.</p>
+    <div class="gv-form-group" style="max-width:320px">
+      <label class="gv-label" for="memory-crn">Company number</label>
+      <input class="gv-input" type="text" id="memory-crn" maxlength="8" autocomplete="off">
+    </div>
+    <button class="gv-button" type="button" id="memory-load">Recall</button>
+    <div id="memory-body"></div>
+  </section>
+
+</main>
+
+<script src="/static/charts.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

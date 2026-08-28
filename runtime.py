@@ -72,8 +72,44 @@ def _connect() -> sqlite3.Connection:
         )
         """
     )
+    _migrate(connection)
     connection.commit()
     return connection
+
+
+def _migrate(connection: sqlite3.Connection) -> None:
+    """Bring an existing job store up to the current schema.
+
+    The company name is only inside the stored report, where SQL cannot search
+    it. Promoting it to a column is what lets the history be filtered by name.
+    """
+
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(jobs)")}
+    if "company_name" in columns:
+        return
+
+    connection.execute("ALTER TABLE jobs ADD COLUMN company_name TEXT NOT NULL DEFAULT ''")
+    # Backfill once, so audits run before this change are searchable too.
+    for row in connection.execute(
+        "SELECT job_id, result FROM jobs WHERE result IS NOT NULL AND result != ''"
+    ).fetchall():
+        try:
+            name = _company_name_of(json.loads(row["result"]))
+        except (ValueError, TypeError):
+            continue
+        if name:
+            connection.execute(
+                "UPDATE jobs SET company_name = ? WHERE job_id = ?", (name, row["job_id"])
+            )
+
+
+def _company_name_of(result: Any) -> str:
+    """The registered name from a finished report, if it has one."""
+
+    if not isinstance(result, dict):
+        return ""
+    profile = ((result.get("raw_statutory_data") or {}).get("profile") or {}).get("data") or {}
+    return str(profile.get("company_name") or "")
 
 
 @contextmanager
@@ -115,8 +151,35 @@ def reconcile_interrupted_jobs() -> int:
         return cursor.rowcount
 
 
-def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
+def _summarise(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The handful of fields a history list needs from a finished report.
+
+    A completed audit is a large document. Sending every one of them to render a
+    table of thirty rows is what makes a history page feel broken, so callers
+    listing jobs get this instead and fetch the full report on demand.
+    """
+
+    if not isinstance(result, dict) or not result:
+        return None
+    verdict = result.get("red_flag_verdict") or {}
+    governance = result.get("governance") or {}
+    profile = ((result.get("raw_statutory_data") or {}).get("profile") or {}).get("data") or {}
+    usage = governance.get("token_usage") or {}
     return {
+        "recommendation": verdict.get("recommendation"),
+        "company_name": profile.get("company_name"),
+        "company_status": profile.get("company_status"),
+        "severity_counts": governance.get("severity_counts") or {},
+        "total_tokens": usage.get("total_tokens", 0),
+        "models_used": governance.get("models_used") or [],
+        "analysis_mode": governance.get("analysis_mode"),
+        "documents_quarantined": governance.get("documents_quarantined", 0),
+    }
+
+
+def _row_to_job(row: sqlite3.Row, include_result: bool = True) -> dict[str, Any]:
+    result = json.loads(row["result"]) if row["result"] else None
+    job = {
         "job_id": row["job_id"],
         "crn": row["crn"],
         "data_room_path": row["data_room_path"],
@@ -126,10 +189,19 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
         "started_at": row["started_at"],
         "finished_at": row["finished_at"],
         "trace_id": row["trace_id"],
-        "events": json.loads(row["events"] or "[]"),
-        "result": json.loads(row["result"]) if row["result"] else None,
         "error": row["error"],
+        "company_name": (
+            (row["company_name"] if "company_name" in row.keys() else "")
+            or _company_name_of(result)
+        ),
+        "summary": _summarise(result),
     }
+    if include_result:
+        job["events"] = json.loads(row["events"] or "[]")
+        job["result"] = result
+    else:
+        job["event_count"] = len(json.loads(row["events"] or "[]"))
+    return job
 
 
 def get_job(job_id: str) -> dict[str, Any] | None:
@@ -138,22 +210,77 @@ def get_job(job_id: str) -> dict[str, Any] | None:
     return _row_to_job(row) if row else None
 
 
-def list_jobs(limit: int = 25, crn: str | None = None) -> list[dict[str, Any]]:
+ALL_STATUSES = frozenset(
+    {STATUS_QUEUED, STATUS_RUNNING, STATUS_SUCCEEDED, STATUS_FAILED, STATUS_CANCELLED, STATUS_INTERRUPTED}
+)
+
+
+def _filters(
+    crn: str | None, status: str | None, query: str | None = None
+) -> tuple[str, list[Any]]:
+    clauses: list[str] = []
+    values: list[Any] = []
+    if crn:
+        clauses.append("crn = ?")
+        values.append(crn)
+    if status:
+        clauses.append("status = ?")
+        values.append(status.upper())
+    if query:
+        # An operator searching a history knows the company by name or by number
+        # and should not have to say which. LIKE is case-insensitive for ASCII in
+        # SQLite, which is what company names are.
+        term = f"%{query.strip()}%"
+        clauses.append("(company_name LIKE ? OR crn LIKE ?)")
+        values.extend([term, term])
+    return (" WHERE " + " AND ".join(clauses)) if clauses else "", values
+
+
+def count_jobs(
+    crn: str | None = None, status: str | None = None, query: str | None = None
+) -> int:
+    """How many jobs match, so a client can page without walking the table."""
+
+    where, values = _filters(crn, status, query)
     with _db() as connection:
-        if crn:
-            rows = connection.execute(
-                "SELECT * FROM jobs WHERE crn = ? ORDER BY created_at DESC LIMIT ?", (crn, limit)
-            ).fetchall()
-        else:
-            rows = connection.execute(
-                "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)
-            ).fetchall()
-    return [_row_to_job(row) for row in rows]
+        row = connection.execute(f"SELECT COUNT(*) AS total FROM jobs{where}", values).fetchone()
+    return int(row["total"]) if row else 0
+
+
+def list_jobs(
+    limit: int = 25,
+    crn: str | None = None,
+    status: str | None = None,
+    offset: int = 0,
+    include_result: bool = True,
+    query: str | None = None,
+) -> list[dict[str, Any]]:
+    """A page of jobs, newest first.
+
+    `include_result=False` omits the full report and the event log, leaving a
+    compact `summary`. Use it for anything rendering a list.
+    """
+
+    where, values = _filters(crn, status, query)
+    with _db() as connection:
+        rows = connection.execute(
+            f"SELECT * FROM jobs{where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (*values, max(1, limit), max(0, offset)),
+        ).fetchall()
+    return [_row_to_job(row, include_result=include_result) for row in rows]
 
 
 def _update(job_id: str, **fields: Any) -> None:
     if not fields:
         return
+    # The searchable name is derived from the report, so it is written wherever a
+    # report is written. Leaving it to callers means one of them eventually
+    # forgets, and the row is quietly unsearchable.
+    if "result" in fields and "company_name" not in fields:
+        try:
+            fields["company_name"] = _company_name_of(json.loads(fields["result"]))
+        except (ValueError, TypeError):
+            fields["company_name"] = ""
     assignments = ", ".join(f"{key} = ?" for key in fields)
     with _WRITE_LOCK, _db() as connection:
         connection.execute(
@@ -238,6 +365,7 @@ def _run_job(job_id: str, crn: str, data_room_path: str, runner: Callable[..., A
                 status=STATUS_SUCCEEDED,
                 finished_at=_now(),
                 result=json.dumps(state, default=str),
+                company_name=_company_name_of(state),
             )
             telemetry.audit(
                 "runtime.finish",

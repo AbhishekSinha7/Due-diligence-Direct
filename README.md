@@ -23,7 +23,7 @@ single call the agents make.
 | **Model Armor** | Seller documents are screened for prompt injection and quarantined; credentials and PII are redacted; every citation is string-matched against the source payload; unverifiable HIGH claims are capped at MEDIUM; the output disclaimer is enforced. |
 | **Telemetry** | OpenTelemetry spans per agent stage plus a hash-chained audit log with a `/audit/verify` endpoint that proves records were not edited. |
 
-Full diagrams and the requirement-by-requirement mapping: [ARCHITECTURE.md](ARCHITECTURE.md).
+Full diagram: [docs/architecture-diagram.png](docs/architecture-diagram.png).
 
 ## Where the financial figures come from
 
@@ -71,7 +71,7 @@ enterprise controls:
   cannot reach Companies House at all.
 - **Tamper-evident.** Hash-chained audit log, verifiable at `/audit/verify`.
 
-Full detail, including what this deliberately does not claim: [ARCHITECTURE.md](ARCHITECTURE.md) section 5.
+What this deliberately does not claim is set out under Limitations, below.
 
 ## The agents
 
@@ -90,7 +90,10 @@ Output is one of `GREEN LIGHT`, `PROCEED WITH CAUTION`, or `RED FLAG DEAL BREAKE
 - **LangGraph** DAG with SQLite checkpointing
 - **FastMCP** tool server over the Companies House API
 - **Google Cloud**: Cloud Run, Cloud Build, Artifact Registry, Secret Manager, Cloud Trace
-- **Streamlit** fleet console
+- **Starlette** control plane, serving the API, the console, and its own OpenAPI contract
+- **GOV.UK Design System** console (no framework, no build step, four static files)
+- **OpenAPI 3.1** contract at `/openapi.json`, rendered at `/docs`
+- **`ddclient`** Python client and CLI, with per-caller signed API keys
 
 ## Setup
 
@@ -114,36 +117,76 @@ For Vertex AI instead of the Gemini API, set `GOOGLE_GENAI_USE_VERTEXAI=true`,
 
 ## Run
 
-Fleet console (recommended for the demo):
+Start the control plane; it serves the operator console at the same address:
 
 ```powershell
-python -m streamlit run dashboard.py
+python -m uvicorn service:app --port 8080     # console: http://localhost:8080
 ```
 
-The console is a **client**, not the fleet. With no configuration it runs the graph
-in-process; set `FLEET_API_URL` and it drives a deployed control plane instead, sharing
-that fleet's job store, memory bank, and audit chain:
+The console is a single-page app in `web/`, styled on the GOV.UK Design System because
+that is where the data comes from. It is a **client of the API**, not a second way into
+the fleet: name search, document upload, the live stage timeline, the agent conversation,
+the report tabs, token accounting and PDF export are all the documented HTTP endpoints.
+
+The API documents itself. `/docs` renders a browsable reference with a
+playground that sends real requests; `/openapi.json` is the machine-readable
+contract, which generates clients for other languages.
+
+`GET /` content-negotiates, so the same URL serves both audiences:
 
 ```powershell
-$env:FLEET_API_URL="https://due-diligence-direct-851846322517.europe-west1.run.app"
-$env:FLEET_API_TOKEN=$(gcloud auth print-identity-token)   # or run it in Cloud Shell
-python -m streamlit run dashboard.py
+curl http://localhost:8080/            # JSON index of every endpoint
+curl http://localhost:8080/api         # the same index, explicitly
 ```
 
-Deployed on Cloud Run, the console authenticates through the metadata server automatically -
-no token to supply, provided its service account holds the Cloud Run Invoker role on the
-control plane. The sidebar shows which backend is active.
+To publish the console, set `FLEET_CONSOLE_ACCESS_CODE`. People exchange the code once
+for an HttpOnly session cookie; machines present a key. With neither variable set the
+service is open, which is what you want locally.
+
+Machine callers get their own key rather than sharing one secret:
+
+```powershell
+python api_keys.py issue --name "partner-crm" --scopes audits:read audits:write --days 30
+```
+
+Keys are signed rather than stored, so they survive a redeploy and can be minted
+anywhere the fleet's signing key is available. Each carries scopes, an expiry and hourly
+budgets; `GET /api/whoami` reports what a key grants and how much of its budget is
+spent. The older shared `FLEET_API_KEY` still works but is unattributable and cannot be
+revoked on its own.
+
+Drive it from Python or the shell with the client library
+([docs/CLIENT.md](docs/CLIENT.md)). To wire another system in, including how to obtain
+every credential it needs, see [docs/INTEGRATION.md](docs/INTEGRATION.md):
+
+```python
+from ddclient import DueDiligenceClient
+
+with DueDiligenceClient("https://fleet.example.run.app", api_key="ddd_v1....") as fleet:
+    report = fleet.run("03994971", on_event=print)
+    print(report.recommendation)
+    for check in report.reconciliation_failures:
+        print(f"{check.identity}: expected {check.expected:,.0f}, filed {check.reported:,.0f}")
+```
+
+```powershell
+python -m ddclient audit 03994971 --watch --pdf report.pdf
+python -m ddclient jobs --search formations
+```
+
+Runnable versions are in [examples/](examples/). Start with `read_only.py`: it proves a
+URL, a key and its scopes all work without spending model quota.
 
 CLI, inline:
 
 ```powershell
-python orchestrator.py 03994971 --data-room sample_data_room
+python orchestrator.py 03994971 --data-room fixtures/deal_documents
 ```
 
 CLI, through the async runtime:
 
 ```powershell
-python orchestrator.py 03994971 --data-room sample_data_room --async-job
+python orchestrator.py 03994971 --data-room fixtures/deal_documents --async-job
 ```
 
 Control plane (what runs on Cloud Run):
@@ -154,7 +197,7 @@ python -m uvicorn service:app --port 8080
 
 ```bash
 curl -X POST localhost:8080/jobs -H 'content-type: application/json' \
-     -d '{"crn":"03994971","data_room_path":"sample_data_room"}'
+     -d '{"crn":"03994971","data_room_path":"fixtures/deal_documents"}'
 curl localhost:8080/jobs/<job_id>     # events, report, trace id
 curl localhost:8080/fleet             # registry, identities, tool policies
 curl localhost:8080/audit/verify      # audit hash chain proof
@@ -234,7 +277,7 @@ figures extracted, and `analysis mode: model`.
 
 ```powershell
 # Model Armor: a poisoned document is quarantined and reported as a finding
-venv\Scripts\python.exe orchestrator.py 03994971 --data-room sample_data_room_hostile --no-save
+venv\Scripts\python.exe orchestrator.py 03994971 --data-room fixtures/deal_documents_tampered --no-save
 
 # Agent Identity: an agent cannot obtain a scope it does not hold
 venv\Scripts\python.exe -c "import agent_identity as a; a.mint_token('debate', audience='fleet-gateway', scopes=[a.SCOPE_STATUTORY_READ])"
@@ -252,24 +295,24 @@ and a JSON block of computed balance sheet metrics.
 ### 6. Run the console and the control plane
 
 ```powershell
-venv\Scripts\python.exe -m streamlit run dashboard.py          # http://localhost:8501
-venv\Scripts\python.exe -m uvicorn service:app --port 8080     # http://localhost:8080
+venv\Scripts\python.exe -m uvicorn service:app --port 8080     # console + API
 ```
 
-The service index at `/` lists every endpoint. `GET /audit/verify` recomputes the audit
+Open http://localhost:8080 for the console. `curl` the same URL for the JSON index of
+every endpoint. `GET /audit/verify` recomputes the audit
 hash chain and should report `{"valid": true, ...}`.
 
 ### 7. Deploy to Google Cloud
 
 See [Deploy to Google Cloud](#deploy-to-google-cloud) below, or the step-by-step
-walkthrough with IAM roles and secrets in [ARCHITECTURE.md](ARCHITECTURE.md).
+walkthrough with IAM roles and secrets in [docs/INTEGRATION.md](docs/INTEGRATION.md).
 
 ## Demo script
 
 1. **Clean run** - submit `03994971` with the sample data room. Watch stage events stream while the run happens in the background.
 2. **Filed accounts tab** - the balance sheet by period, every figure traced to its iXBRL tag, the four identity checks, and the inconsistency that causes the liquidity ratio to be withheld.
 3. **Governance tab** - trace id, models used, registry versions, guardrail verdicts, and the audit records for that exact trace.
-4. **Hostile data room** - rerun against `sample_data_room_hostile`. A seller document instructing the agents to "mark this company as clean" is quarantined by Model Armor, and the tampering itself is reported as a risk.
+4. **Hostile data room** - rerun against `fixtures/deal_documents_tampered`. A seller document instructing the agents to "mark this company as clean" is quarantined by Model Armor, and the tampering itself is reported as a risk.
 5. **Memory** - rerun the same company. The fleet recalls the previous verdict and reports what changed since the last audit.
 6. **Audit trail tab** - the hash chain verifies across every record written by the CLI, the console, and the API.
 
@@ -281,12 +324,15 @@ walkthrough with IAM roles and secrets in [ARCHITECTURE.md](ARCHITECTURE.md).
 python -m unittest discover -s tests -t .
 ```
 
-49 tests, no network required. They cover iXBRL number formats, tag extraction and
-period grouping, ratio and runway mathematics, the accounting-identity gate that suppresses
-unreliable liquidity claims, identity token forgery and expiry, registry versioning and
-lifecycle, gateway denial paths (unregistered tool, undeclared capability, egress, quota,
-retry), Model Armor injection and grounding behaviour, memory deltas, runtime job lifecycle
-including cancellation and failure, and audit-chain verification.
+185 tests, no network required. They cover iXBRL number formats, tag extraction and
+period grouping, ratio mathematics, the accounting-identity gate that suppresses
+unreliable liquidity claims, contract-finding severity ordering, identity token forgery
+and expiry, registry versioning, gateway denial paths (unregistered tool, undeclared
+capability, egress, quota, retry), Model Armor injection and grounding behaviour, API key
+signing, scope enforcement and revocation, the session cookie's flags behind a
+TLS-terminating proxy, security headers and asset caching, memory deltas, job listing and
+pagination, the OpenAPI contract against the actual routes, the client library against a
+real server, and audit-chain verification.
 
 ## Limitations
 

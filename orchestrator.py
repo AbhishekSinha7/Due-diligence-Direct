@@ -586,6 +586,8 @@ def _accounts_findings(accounts: dict[str, Any]) -> list[dict[str, str]]:
 # Severity here means "how much deal-team attention", not "how fatal". A contract
 # clause is a condition to negotiate; only statutory distress (insolvency, an
 # insolvent balance sheet) is a hard stop, so no clause is graded HIGH.
+SEVERITY_RANK = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "CLEAR": 3}
+
 CLAUSE_PATTERNS: tuple[tuple[str, str, str], ...] = (
     ("change of control", "MEDIUM", "Change of Control"),
     ("uncapped indemnit", "MEDIUM", "Uncapped Indemnity"),
@@ -667,6 +669,11 @@ def _data_room_findings(data_room: dict[str, Any], limit: int = 8) -> list[dict[
                 }
             )
 
+    # The cap has to drop the least serious finding, not the last one added.
+    # Semantic matches arrive ordered by similarity, so without this a LOW
+    # auto-renewal at 0.84 displaced a MEDIUM change of control at 0.75. The sort
+    # is stable, so within one severity the similarity order is preserved.
+    findings.sort(key=lambda finding: SEVERITY_RANK.get(finding.get("severity", ""), 9))
     return findings[:limit]
 
 
@@ -1713,7 +1720,14 @@ def _print_report(final_state: DueDiligenceState) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the DueDiligence Direct agent fleet.")
     parser.add_argument("crn", nargs="?", default="03994971", help="UK company registration number")
-    parser.add_argument("--data-room", default="data_room", help="Folder with PDF, CSV, TXT, or MD deal documents")
+    # Defaults to no documents, matching POST /jobs. It used to default to
+    # "data_room", which is the *upload root*: every document any caller had ever
+    # uploaded, for any company, was ingested into every CLI run.
+    parser.add_argument(
+        "--data-room",
+        default="",
+        help="Folder with PDF, CSV, TXT, or MD deal documents. Omit to audit statutory records alone.",
+    )
     parser.add_argument("--async-job", action="store_true", help="Submit to the async Agent Runtime instead of running inline")
     parser.add_argument("--no-save", action="store_true", help="Do not save a JSON run artifact")
     parser.add_argument("--json", action="store_true", help="Print the full final state as JSON")

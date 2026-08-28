@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>API reference - DueDiligence Direct</title>
+<link rel="icon" href="data:,">
+<style>
+  body { margin: 0; font-family: arial, helvetica, sans-serif; }
+  /* The service header, so the reference reads as part of the same service. */
+  .gv-header {
+    background: #0b0c0c; border-bottom: 10px solid #1d70b8; color: #fff;
+    padding: 10px 20px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 15px;
+  }
+  .gv-header a { color: #fff; text-decoration: none; }
+  .gv-header a:hover { text-decoration: underline; text-decoration-thickness: 3px; }
+  .gv-header__logo { font-size: 1.4rem; font-weight: 700; }
+  .gv-header__service { font-size: 0.95rem; padding-left: 15px; border-left: 1px solid rgba(255,255,255,0.35); }
+  .gv-header__links { margin-left: auto; font-size: 0.9rem; display: flex; gap: 20px; }
+  .gv-header a:focus {
+    outline: 3px solid #ffdd00; outline-offset: 0; background: #ffdd00; color: #0b0c0c;
+  }
+  noscript div { padding: 20px; font-size: 1rem; }
+</style>
+</head>
+<body>
+
+<header class="gv-header">
+  <span class="gv-header__logo">DueDiligence Direct</span>
+  <span class="gv-header__service">API reference</span>
+  <nav class="gv-header__links">
+    <a href="/">Console</a>
+    <a href="/openapi.json">openapi.json</a>
+  </nav>
+</header>
+
+<noscript>
+  <div>
+    <p>This reference needs JavaScript to render.</p>
+    <p>The machine-readable specification is at <a href="/openapi.json">/openapi.json</a> and
+       needs nothing but an HTTP client.</p>
+  </div>
+</noscript>
+
+<!-- Scalar reads the spec and its configuration from this element's attributes.
+     The configuration is a static attribute rather than an inline script so the
+     page needs no 'unsafe-inline' in script-src.
+
+     proxyUrl is deliberately empty. The bundle ships a default request proxy at
+     proxy.scalar.com; leaving it enabled would send "Try it" requests - and any
+     credential typed into them - through a third party. Requests now go direct
+     to this origin, and connect-src 'self' enforces that even if this is wrong.
+
+     The bundle is vendored under /static/vendor rather than loaded from a CDN:
+     this page shares an origin with the authenticated console, so a script here
+     can make credentialed same-origin requests. See web/vendor/README.md. -->
+<div id="app"></div>
+<script id="api-reference"
+        data-url="/openapi.json"
+        data-configuration='{"theme":"default","layout":"modern","darkMode":false,"proxyUrl":"","hideDownloadButton":false,"metaData":{"title":"DueDiligence Direct API reference"}}'></script>
+<script src="/static/vendor/scalar.standalone.js"></script>
+
+</body>
+</html>
