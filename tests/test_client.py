@@ -23,13 +23,27 @@ from ddclient.models import Job
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _saved_run() -> dict:
-    """The most recent real audit checked into runs/, if there is one."""
+def _saved_run(require_accounts: bool = False) -> dict:
+    """A real audit from runs/, newest first.
+
+    `require_accounts` picks the newest run that actually parsed filed accounts.
+    Taking whatever ran last made this suite's coverage depend on which company
+    someone audited most recently — a dormant company would silently skip the
+    reconciliation assertions rather than fail them.
+    """
 
     runs = sorted((REPO_ROOT / "runs").glob("*.json"))
     if not runs:
         raise unittest.SkipTest("no saved run available")
-    return json.loads(runs[-1].read_text(encoding="utf-8"))
+
+    for path in reversed(runs):
+        run = json.loads(path.read_text(encoding="utf-8"))
+        if not require_accounts:
+            return run
+        analysis = ((run.get("accounts") or {}).get("latest") or {}).get("analysis") or {}
+        if analysis.get("periods"):
+            return run
+    raise unittest.SkipTest("no saved run has parsed accounts")
 
 
 class ReportModelTests(unittest.TestCase):
@@ -37,7 +51,7 @@ class ReportModelTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.state = _saved_run()
+        cls.state = _saved_run(require_accounts=True)
         cls.report = Report(cls.state)
 
     def test_identity_and_verdict(self):
@@ -77,8 +91,7 @@ class ReportModelTests(unittest.TestCase):
         """The known-bad filing must be reported, not smoothed over."""
 
         periods = self.report.periods
-        if not periods:
-            self.skipTest("saved run has no parsed accounts")
+        self.assertTrue(periods, "setUpClass selects a run with parsed accounts")
         checks = [c for p in periods for c in p.reconciliation]
         self.assertTrue(checks, "filed accounts should carry identity checks")
         failures = self.report.reconciliation_failures

@@ -1,14 +1,36 @@
+# Secrets and local environment
 .env
 venv/
+
+# Python build artefacts
 __pycache__/
 *.py[cod]
 *.log
+
+# Generated fleet state. Regenerated on demand; never meaningful in a diff.
 runs/
 telemetry/
 .fleet/
+
+# Uploaded deal documents are real counterparty material. Never commit them.
 data_room/*
 !data_room/.gitkeep
-docs/*
+
+# ---------------------------------------------------------------------------
+# Working notes for the hackathon submission. Useful to the author, noise to
+# anyone reading the project. Listing a file here does NOT remove it from the
+# repository if it is already tracked — that needs `git rm --cached <file>`.
+# ---------------------------------------------------------------------------
+docs/PROMOTION.md
+docs/DEVPOST.md
+docs/DEMO_SCRIPT.md
 BLOG_POST.md
-ARCHITECTURE.md
 SOCIAL_POST.md
+ARCHITECTURE.md
+# Kept deliberately, despite living beside the notes above:
+#   docs/CLIENT.md              the client library reference, linked from the README
+#   docs/INTEGRATION.md         how another system obtains credentials and calls the API
+docs/architecture-diagram.* the diagram and its exports, a submission asset
+examples/                   four runnable scripts; linked from the README and
+#                               INTEGRATION.md, and the fastest way for a reader to
+#                               answer "can I actually use this?"
